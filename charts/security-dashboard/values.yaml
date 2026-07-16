@@ -26,8 +26,9 @@ scan:
   containerdSocketPath: /run/containerd/containerd.sock
 
 trivy:
-  # Image used for the on-demand scan Jobs.
-  image: aquasec/trivy:0.59.0
+  # Image used for the on-demand scan Jobs. Keep >=0.61: earlier versions
+  # abort the whole scan when a single image can't be fetched.
+  image: aquasec/trivy:0.72.0
   # Optional TRIVY_PLATFORM hint (e.g. "linux/arm64"). Usually leave empty.
   platform: ""
 
@@ -56,9 +57,12 @@ persistence:
   # (bypasses the ~10MB kubelet container-log ceiling). Needs a storage class
   # supporting ReadWriteMany (CephFS, EFS, NFS, Longhorn RWX, ...). On a
   # single-node cluster you can switch to ReadWriteOnce.
+  # Size the volume for the UNCOMPRESSED full-vulnerability JSON of your whole
+  # cluster — a few dozen workloads easily exceeds 200Mi; the scan fails with
+  # "disk quota exceeded" if this is too small.
   scanResults:
     storageClassName: ""
-    size: 1Gi
+    size: 5Gi
     accessModes: ["ReadWriteMany"]
 
 suppressions:

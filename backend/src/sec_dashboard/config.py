@@ -42,7 +42,10 @@ class Settings(BaseSettings):
     def raw_dir(self) -> str:
         return str(Path(self.data_dir) / "raw")
 
-    trivy_image: str = "aquasec/trivy:0.59.0"
+    # 0.61+ required: earlier versions abort the whole `trivy k8s` scan when a
+    # single image can't be fetched; newer ones log an ERROR for that image and
+    # keep scanning (we surface those as INFO findings — see manager.py).
+    trivy_image: str = "aquasec/trivy:0.72.0"
 
     # The plugin reaches this backend through Headlamp's in-cluster apiserver
     # service-proxy (same origin as Headlamp), so CORS is not exercised in

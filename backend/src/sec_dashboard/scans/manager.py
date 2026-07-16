@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime
 from typing import Any
 from uuid import uuid4
@@ -29,6 +30,7 @@ from uuid import uuid4
 from sqlalchemy import select
 
 from ..config import settings
+from ..severity import Severity
 from ..db import Event, Finding, Scan, get_sessionmaker
 from ..mock_data import mock_raw_output, mock_scans
 from .. import storage
@@ -107,6 +109,44 @@ def _cleanup_pvc_result(scan_id: str) -> None:
             pass
         except OSError as e:
             log.warning("scan %s: cleanup of %s failed: %s", scan_id, path, e)
+
+
+# Trivy ≥0.61 doesn't abort `trivy k8s` when one image can't be fetched — it
+# logs one ERROR per image and keeps scanning. This typically hits single-arch
+# private-registry images that aren't in the scan node's containerd store:
+# `trivy k8s` has no --platform flag and asks registries for linux/amd64
+# regardless of the node's arch (upstream limitation, verified through 0.72).
+# The escaped \" is how the image name appears inside trivy's err="..." lines.
+_UNSCANNABLE_IMAGE_RE = re.compile(r'unable to find the specified image \\*"([^"\\]+)')
+
+
+def _unscannable_image_findings(scanner_log: str) -> list[dict]:
+    """One INFO finding per image Trivy skipped, so coverage gaps are visible
+    in the dashboard instead of buried in the scanner log."""
+    images = sorted({m.group(1) for m in _UNSCANNABLE_IMAGE_RE.finditer(scanner_log or "")})
+    return [
+        {
+            "severity_normalized": int(Severity.INFO),
+            "severity_original": "SKIPPED",
+            "scanner_id": None,
+            "resource_ns": None,
+            "resource_kind": "Image",
+            "resource_name": image,
+            "image": image,
+            "title": "Image could not be scanned",
+            "description": (
+                "Trivy could not fetch this image from any source, so it has no "
+                "vulnerability coverage in this scan. Typical cause: a single-arch "
+                "private-registry image that is not present in the scan node's "
+                "container runtime cache (`trivy k8s` requests linux/amd64 from "
+                "registries regardless of node architecture)."
+            ),
+            "control_id": None,
+            "evidence": {"reason": "image unavailable to scanner"},
+            "ecosystem_bucket": False,
+        }
+        for image in images
+    ]
 
 
 def _summary_counts(findings: list[dict]) -> dict[str, int]:
@@ -399,6 +439,7 @@ class ScanManager:
                     errors.append(f"{name}: parse failed: {e}")
                     continue
                 all_findings.extend(findings)
+                all_findings.extend(_unscannable_image_findings(scanner_log))
             elif j["failed"] > 0:
                 pod = await k8s.find_pod(name)
                 scanner_log = ""

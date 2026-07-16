@@ -545,3 +545,30 @@ suppressions:
     # "AVD-KSV-0041" — and the lookup prefers evidence.avd_id, so the entry
     # keyed on "5.1.2" must NOT match.
     assert admin["severity_normalized"] == int(Severity.CRITICAL)
+
+
+# ---------- unscannable-image extraction (manager) ----------
+
+def test_unscannable_image_findings_from_scanner_log():
+    from sec_dashboard.scans.manager import _unscannable_image_findings
+
+    log_text = (
+        '2026-07-16T10:31:34Z\tERROR\tError during vulnerabilities or misconfiguration scan\t'
+        'err="scan error: unable to initialize a scan service: unable to initialize artifact: '
+        'unable to initialize container image: unable to find the specified image '
+        '\\"registry.example.com/team/api:v0.4.1\\" in [\\"docker\\" \\"containerd\\" \\"podman\\" \\"remote\\"]"\n'
+        '2026-07-16T10:31:34Z\tERROR\t...unable to find the specified image '
+        '\\"registry.example.com/team/web:v0.4.0\\" in [...]\n'
+        # duplicate of the first image — must be deduped
+        '2026-07-16T10:31:35Z\tERROR\t...unable to find the specified image '
+        '\\"registry.example.com/team/api:v0.4.1\\" in [...]\n'
+    )
+    findings = _unscannable_image_findings(log_text)
+    assert [f["image"] for f in findings] == [
+        "registry.example.com/team/api:v0.4.1",
+        "registry.example.com/team/web:v0.4.0",
+    ]
+    assert all(f["severity_normalized"] == int(Severity.INFO) for f in findings)
+    assert all(f["title"] == "Image could not be scanned" for f in findings)
+    assert _unscannable_image_findings("") == []
+    assert _unscannable_image_findings("all good, no errors") == []
