@@ -1,0 +1,20 @@
+# ClusterIP fronting the backend. The Headlamp plugin reaches it through the
+# Kubernetes apiserver service proxy:
+#   /api/v1/namespaces/security-dashboard/services/security-dashboard-api:80/proxy/api/scans
+# The name and port are part of that contract — do not rename.
+apiVersion: v1
+kind: Service
+metadata:
+  name: security-dashboard-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "security-dashboard.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "security-dashboard.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+      protocol: TCP

@@ -1,0 +1,19 @@
+apiVersion: v2
+name: security-dashboard
+description: >-
+  Backend for the Security Dashboard Headlamp plugin — launches on-demand
+  Trivy scans (CIS / NSA / full vulnerability) as Kubernetes Jobs, stores the
+  normalized findings, and serves them to the plugin through the Kubernetes
+  apiserver service proxy.
+type: application
+version: 0.5.0
+appVersion: "0.5.0"
+home: https://github.com/mcman2017/security-dashboard
+sources:
+  - https://github.com/mcman2017/security-dashboard
+keywords:
+  - security
+  - trivy
+  - headlamp
+  - vulnerability-scanning
+  - compliance

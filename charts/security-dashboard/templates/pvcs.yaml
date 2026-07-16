@@ -1,0 +1,55 @@
+# SQLite DB + retained raw scan outputs.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: security-dashboard-data
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "security-dashboard.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.persistence.data.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.data.size }}
+---
+# Trivy vulnerability-DB cache — avoids re-downloading the DB every scan.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: security-dashboard-trivy-cache
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "security-dashboard.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.persistence.trivyCache.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.trivyCache.size }}
+---
+# Shared between the backend Deployment and the on-demand Trivy scan Jobs.
+# Trivy writes /scan-results/<scan-id>.json; the backend reads it as a file —
+# bypasses the ~10MB kubelet container-log ceiling that truncates large
+# full-vulnerability output.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: security-dashboard-scan-results
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "security-dashboard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scan-results
+spec:
+  accessModes:
+    {{- toYaml .Values.persistence.scanResults.accessModes | nindent 4 }}
+  {{- with .Values.persistence.scanResults.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.scanResults.size }}

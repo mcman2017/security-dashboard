@@ -1,0 +1,36 @@
+security-dashboard backend installed in namespace {{ .Release.Namespace }}.
+
+{{- if ne .Release.Namespace "security-dashboard" }}
+
+WARNING: the Headlamp plugin reaches this backend at the fixed proxy path
+  /api/v1/namespaces/security-dashboard/services/security-dashboard-api:80/proxy/api
+but you installed into "{{ .Release.Namespace }}". Reinstall with:
+  helm install security-dashboard <chart> -n security-dashboard --create-namespace
+{{- end }}
+
+{{- if eq .Values.scan.mode "node-cache" }}
+
+scan.mode=node-cache: the Trivy scan Jobs mount the node's containerd socket
+(hostPath) and require Pod Security Standards "privileged" on this namespace:
+
+  kubectl label namespace {{ .Release.Namespace }} \
+    pod-security.kubernetes.io/enforce=privileged --overwrite
+{{- else }}
+
+scan.mode=registry: scan Jobs pull image layers from the registries directly.
+The namespace can enforce PSS "baseline":
+
+  kubectl label namespace {{ .Release.Namespace }} \
+    pod-security.kubernetes.io/enforce=baseline --overwrite
+
+If your workload images live in private registries, give Trivy pull
+credentials (see the chart README) or switch to scan.mode=node-cache.
+{{- end }}
+
+Next steps:
+  1. Install the Security Dashboard plugin into Headlamp (desktop Plugin
+     Catalog, or the headlamp chart's pluginsManager — see the project README).
+  2. Open Headlamp → Security Scans → Overview and launch a scan.
+
+The identity Headlamp uses must be allowed `services/proxy` in the
+{{ .Release.Namespace }} namespace to reach the backend.

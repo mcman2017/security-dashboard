@@ -1,0 +1,109 @@
+# IMPORTANT: the Headlamp plugin reaches this backend through the Kubernetes
+# apiserver service proxy at a fixed path:
+#   /api/v1/namespaces/security-dashboard/services/security-dashboard-api:80/proxy/api
+# so install this chart into the `security-dashboard` namespace:
+#   helm install security-dashboard <chart> -n security-dashboard --create-namespace
+
+image:
+  repository: ghcr.io/mcman2017/security-dashboard-backend
+  # Defaults to the chart appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+scan:
+  # How the Trivy scan Jobs read image layers:
+  #   registry   — pull from the image registries directly (default). No
+  #                hostPath, no extra node access; the namespace can enforce
+  #                Pod Security Standards "baseline".
+  #   node-cache — mount the node's containerd socket (hostPath) and read the
+  #                already-pulled layers from the runtime cache. Needed for
+  #                air-gapped clusters, private single-arch registries, or to
+  #                avoid registry rate limits. Requires labeling the namespace
+  #                pod-security.kubernetes.io/enforce=privileged (see NOTES).
+  mode: registry
+  containerdSocketPath: /run/containerd/containerd.sock
+
+trivy:
+  # Image used for the on-demand scan Jobs.
+  image: aquasec/trivy:0.59.0
+  # Optional TRIVY_PLATFORM hint (e.g. "linux/arm64"). Usually leave empty.
+  platform: ""
+
+rbac:
+  create: true
+  # Grant the scanner ClusterRole cluster-wide read on Secrets so Trivy can
+  # flag credentials embedded in Secret YAMLs. Off by default; when off, Trivy
+  # logs "forbidden" warnings for secrets and skips those checks.
+  scanSecrets: false
+
+serviceAccounts:
+  backend: security-dashboard-backend
+  scanner: trivy-scanner
+
+persistence:
+  # SQLite DB + retained raw scan outputs.
+  data:
+    storageClassName: ""
+    size: 20Gi
+  # Trivy vulnerability-DB cache — avoids re-downloading the DB every scan.
+  trivyCache:
+    storageClassName: ""
+    size: 5Gi
+  # Shared between the backend Deployment and the scan Jobs: the scanner
+  # writes /scan-results/<scan-id>.json, the backend reads it as a file
+  # (bypasses the ~10MB kubelet container-log ceiling). Needs a storage class
+  # supporting ReadWriteMany (CephFS, EFS, NFS, Longhorn RWX, ...). On a
+  # single-node cluster you can switch to ReadWriteOnce.
+  scanResults:
+    storageClassName: ""
+    size: 1Gi
+    accessModes: ["ReadWriteMany"]
+
+suppressions:
+  # Override the plugin/backend's built-in suppression allowlist with your own
+  # (mounted via ConfigMap; see docs/suppressions.md for the format).
+  enabled: false
+  content: ""
+  # suppressions:
+  #   - avd_id: AVD-KSV-0041
+  #     target_kind: ClusterRole
+  #     target_name: my-operator
+  #     reason: app-by-design
+  #     justification: ...
+
+# Optional host-OS scanners surfaced on the plugin's "Host OS" page. These run
+# in a separate namespace (default trivy-system — the plugin's Host OS page
+# reads pod logs from that namespace) and require privileged access to the
+# host filesystem. See docs/host-scans.md.
+hostScanners:
+  namespace: trivy-system
+  createNamespace: false
+  # Per-node `trivy rootfs` of the host filesystem (DaemonSet, daily loop).
+  trivyRootfs:
+    enabled: false
+    image: aquasec/trivy:0.59.0
+    extraSkipDirs: []
+  # Daily Lynis audit of the host OS (CronJob). Requires an image containing
+  # the `lynis` binary — there is no official upstream image; see
+  # docs/host-scans.md for a two-line Dockerfile.
+  lynis:
+    enabled: false
+    image: ""
+    schedule: "0 3 * * *"
+    # Pin the audit to one node (empty = any node).
+    nodeSelector: {}
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  # Ingesting a full-vulnerability scan holds the raw JSON + parsed objects
+  # in memory; a full cluster scan peaks at several hundred MB.
+  limits:
+    memory: 4Gi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

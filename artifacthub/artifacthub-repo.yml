@@ -1,0 +1,7 @@
+# ArtifactHub repository metadata for the Headlamp plugin.
+# Register this repo on artifacthub.io (kind: Headlamp plugins,
+# url: https://github.com/mcman2017/security-dashboard, path: artifacthub),
+# then paste the repository ID ArtifactHub assigns below.
+repositoryID: REPLACE_WITH_ARTIFACTHUB_REPO_ID
+owners:
+  - name: mcman2017

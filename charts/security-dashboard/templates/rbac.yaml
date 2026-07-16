@@ -1,0 +1,104 @@
+{{- if .Values.rbac.create }}
+# Namespaced Role: the backend orchestrates its own Trivy scan Jobs + reads
+# their pod logs/events. It needs NO cluster-wide read itself — the scan Jobs
+# (running as the scanner SA) are what read the cluster.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: security-dashboard-backend
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "security-dashboard.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "delete", "patch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: security-dashboard-backend
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "security-dashboard.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.serviceAccounts.backend }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: security-dashboard-backend
+  apiGroup: rbac.authorization.k8s.io
+---
+# Cluster-wide read for the `trivy k8s` scan. get/list only. Secrets access is
+# opt-in (rbac.scanSecrets) — with it, Trivy can flag credentials embedded in
+# Secret YAMLs; without it, Trivy logs "forbidden" warnings and skips those
+# checks.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: security-dashboard-trivy-scanner
+  labels:
+    {{- include "security-dashboard.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources:
+      - nodes
+      - namespaces
+      - pods
+      - services
+      - configmaps
+      - limitranges
+      - resourcequotas
+      - serviceaccounts
+      - persistentvolumes
+      - persistentvolumeclaims
+      - endpoints
+      - replicationcontrollers
+      {{- if .Values.rbac.scanSecrets }}
+      - secrets
+      {{- end }}
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "daemonsets", "statefulsets", "replicasets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["get", "list"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
+    verbs: ["get", "list"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources: ["validatingwebhookconfigurations", "mutatingwebhookconfigurations"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: security-dashboard-trivy-scanner
+  labels:
+    {{- include "security-dashboard.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.serviceAccounts.scanner }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: security-dashboard-trivy-scanner
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

@@ -1,0 +1,121 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: security-dashboard-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "security-dashboard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  # Single replica — RWO data PVC + single-writer SQLite.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "security-dashboard.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "security-dashboard.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: backend
+      {{- if .Values.suppressions.enabled }}
+      annotations:
+        checksum/suppressions: {{ .Values.suppressions.content | sha256sum }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccounts.backend }}
+      automountServiceAccountToken: true
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: {{ include "security-dashboard.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: api
+              containerPort: 8000
+          env:
+            - name: SEC_DASHBOARD_NAMESPACE
+              value: {{ .Release.Namespace }}
+            - name: SEC_DASHBOARD_DATA_DIR
+              value: /data
+            - name: SEC_DASHBOARD_SCAN_MODE
+              value: {{ .Values.scan.mode | quote }}
+            - name: SEC_DASHBOARD_CONTAINERD_SOCKET_PATH
+              value: {{ .Values.scan.containerdSocketPath | quote }}
+            - name: SEC_DASHBOARD_TRIVY_IMAGE
+              value: {{ .Values.trivy.image | quote }}
+            {{- with .Values.trivy.platform }}
+            - name: SEC_DASHBOARD_TRIVY_PLATFORM
+              value: {{ . | quote }}
+            {{- end }}
+            - name: SEC_DASHBOARD_SCANNER_SERVICE_ACCOUNT
+              value: {{ .Values.serviceAccounts.scanner }}
+            {{- if .Values.suppressions.enabled }}
+            - name: SEC_DASHBOARD_SUPPRESSIONS_PATH
+              value: /config/suppressions.yaml
+            {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            # Shared with the on-demand Trivy scan Jobs (see pvcs.yaml).
+            - name: scan-results
+              mountPath: /scan-results
+            {{- if .Values.suppressions.enabled }}
+            - name: suppressions
+              mountPath: /config
+              readOnly: true
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          livenessProbe:
+            httpGet: { path: /api/health, port: 8000 }
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet: { path: /api/health, port: 8000 }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: security-dashboard-data
+        - name: scan-results
+          persistentVolumeClaim:
+            claimName: security-dashboard-scan-results
+        {{- if .Values.suppressions.enabled }}
+        - name: suppressions
+          configMap:
+            name: security-dashboard-suppressions
+        {{- end }}

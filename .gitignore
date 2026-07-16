@@ -1,0 +1,17 @@
+node_modules/
+node_modules
+dist/
+*.tar.gz
+.DS_Store
+.eslintcache
+
+# Python backend build/test artifacts
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.venv/
+*.egg-info/
+*.db
+*.db-journal

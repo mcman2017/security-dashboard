@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  scrub-gate:
+    name: No internal references
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: grep for internal hostnames/paths
+        run: |
+          ! grep -rniE "theclamlife|postqsql|qt-vault|spark-c2b1|amac2025" . \
+            --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.github
+
+  plugin:
+    name: Plugin (lint, typecheck, build, package)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run tsc
+      - run: npm run build
+      - run: npm run package
+
+  backend:
+    name: Backend (ruff, pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e '.[dev]'
+      - run: ruff check src tests
+      - run: pytest
+
+  chart:
+    name: Helm chart lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - run: helm lint charts/security-dashboard
+      - run: |
+          helm template test charts/security-dashboard -n security-dashboard \
+            --set hostScanners.trivyRootfs.enabled=true \
+            --set hostScanners.lynis.enabled=true \
+            --set hostScanners.lynis.image=example/lynis:latest \
+            --set suppressions.enabled=true \
+            --set suppressions.content='suppressions: []' \
+            --set rbac.scanSecrets=true \
+            --set scan.mode=node-cache > /dev/null

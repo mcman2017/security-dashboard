@@ -1,0 +1,408 @@
+# Finding suppression allowlist — accepted-risk (avd_id, target_kind, target_name) triples.
+#
+# Each entry matches one (avd_id, target_kind, target_name) triple; entries with
+# target_name_pattern glob-match dynamically named resources. When a parser
+# encounters a finding whose triple is in this list, it rebuckets the finding to
+# severity_normalized=SUPPRESSED (NOT dropped — the raw finding stays visible
+# under Scans → <scan> → suppressed). The justification surfaces inline so the
+# security review trail lives in the UI.
+#
+# This file ships a MINIMAL starter set: findings that are true on effectively
+# every kubeadm-based cluster (built-in Kubernetes roles and static pods) plus
+# chart-default cert-manager / ingress-nginx roles and this project's own
+# scanner. Everything else on your cluster is intentionally NOT suppressed —
+# review each finding and add your own entries (see docs/suppressions.md for
+# the format and how to override this file via ConfigMap).
+#
+# Reasons:
+#   built-in-k8s   — ships with Kubernetes; rules required by kubelet/controllers.
+#   vendor-helm    — managed by an upstream Helm chart with these defaults.
+#   app-by-design  — workload's purpose IS to read/manage the flagged surface.
+
+suppressions:
+
+  # -------------------------------------------------------------------------
+  # Built-in Kubernetes ClusterRoles — removing rules breaks the cluster.
+  # -------------------------------------------------------------------------
+  - avd_id: AVD-KSV-0041
+    target_kind: ClusterRole
+    target_name: admin
+    reason: built-in-k8s
+    justification: >-
+      Aggregated `admin` role ships with K8s and is the standard role for
+      namespace administrators. Secret CRUD is required so admins can deploy
+      workloads that consume Secrets in their namespace.
+
+  - avd_id: AVD-KSV-0041
+    target_kind: ClusterRole
+    target_name: edit
+    reason: built-in-k8s
+    justification: >-
+      Built-in `edit` role; same rationale as `admin`. Required for non-admin
+      developers to create workloads referencing Secrets in their namespace.
+
+  - avd_id: AVD-KSV-0041
+    target_kind: ClusterRole
+    target_name: system:aggregate-to-edit
+    reason: built-in-k8s
+    justification: >-
+      Aggregation source for `edit`. Modifying it would silently remove
+      secret-management permission from every namespace developer.
+
+  - avd_id: AVD-KSV-0041
+    target_kind: ClusterRole
+    target_name: system:controller:legacy-service-account-token-cleaner
+    reason: built-in-k8s
+    justification: >-
+      Controller that garbage-collects legacy SA-token Secrets when the
+      ServiceAccount is deleted. Needs delete/list/watch on secrets by design.
+
+  - avd_id: AVD-KSV-0041
+    target_kind: ClusterRole
+    target_name: system:kube-controller-manager
+    reason: built-in-k8s
+    justification: >-
+      kube-controller-manager mints and rotates SA-token Secrets, TLS bootstrap
+      Secrets, and CA Secrets for endpointslice-controller / certificate-controller /
+      attachdetach-controller / etc. Removing secret access halts the control plane.
+
+  - avd_id: AVD-KSV-0041
+    target_kind: ClusterRole
+    target_name: system:node
+    reason: built-in-k8s
+    justification: >-
+      kubelet identity. Reads pod-bound Secrets (TLS material, image-pull
+      credentials, projected SA tokens) for the pods it runs. Required.
+
+  - avd_id: AVD-KSV-0044
+    target_kind: ClusterRole
+    target_name: cluster-admin
+    reason: built-in-k8s
+    justification: >-
+      Built-in cluster-admin role. Wildcard-on-wildcard is its definition.
+      Cannot modify; instead, restrict who is bound to it.
+
+  - avd_id: AVD-KSV-0046
+    target_kind: ClusterRole
+    target_name: cluster-admin
+    reason: built-in-k8s
+    justification: >-
+      Same role as above; KSV046 fires on the same wildcard. Same justification.
+
+  - avd_id: AVD-KSV-0046
+    target_kind: ClusterRole
+    target_name: system:controller:generic-garbage-collector
+    reason: built-in-k8s
+    justification: >-
+      GC controller deletes any resource type that has owner references.
+      Requires wildcard delete by design.
+
+  - avd_id: AVD-KSV-0046
+    target_kind: ClusterRole
+    target_name: system:controller:horizontal-pod-autoscaler
+    reason: built-in-k8s
+    justification: >-
+      HPA can target any scalable resource (Deployment, ReplicaSet, StatefulSet,
+      custom CRDs declaring the `scale` subresource). Wildcard is required.
+
+  - avd_id: AVD-KSV-0046
+    target_kind: ClusterRole
+    target_name: system:controller:namespace-controller
+    reason: built-in-k8s
+    justification: >-
+      On namespace deletion, the namespace-controller must delete every resource
+      in the namespace regardless of type. Wildcard delete by design.
+
+  - avd_id: AVD-KSV-0046
+    target_kind: ClusterRole
+    target_name: system:controller:resourcequota-controller
+    reason: built-in-k8s
+    justification: >-
+      ResourceQuota counts every API-server-known kind against a quota. Needs
+      list/watch on all resource types.
+
+  - avd_id: AVD-KSV-0046
+    target_kind: ClusterRole
+    target_name: system:kube-controller-manager
+    reason: built-in-k8s
+    justification: >-
+      kube-controller-manager aggregates dozens of controllers; some need
+      wildcard access (e.g. garbage-collector). Removing wildcards breaks
+      the control plane.
+
+  # -------------------------------------------------------------------------
+  # Chart-default vendor roles (cert-manager / ingress-nginx). These match the
+  # upstream Helm charts' shipped RBAC; `kubectl edit` reverts on the next
+  # Helm reconcile, and dropping the permissions breaks the controllers.
+  # -------------------------------------------------------------------------
+  - avd_id: AVD-KSV-0041
+    target_kind: ClusterRole
+    target_name: cert-manager-cainjector
+    reason: vendor-helm
+    justification: >-
+      cert-manager Helm chart. CA injector reads/writes Secrets holding the
+      issuer CA material to inject into webhook configurations.
+
+  - avd_id: AVD-KSV-0041
+    target_kind: ClusterRole
+    target_name: cert-manager-controller-certificates
+    reason: vendor-helm
+    justification: >-
+      cert-manager Helm chart. Certificate controller stores issued TLS
+      material in Secrets. CRUD required for the rotation lifecycle.
+
+  - avd_id: AVD-KSV-0041
+    target_kind: ClusterRole
+    target_name: cert-manager-controller-challenges
+    reason: vendor-helm
+    justification: >-
+      cert-manager Helm chart. ACME-01 challenge controller writes the
+      challenge token to a Secret consumed by the http01/dns01 solver pod.
+
+  - avd_id: AVD-KSV-0041
+    target_kind: ClusterRole
+    target_name: cert-manager-controller-clusterissuers
+    reason: vendor-helm
+    justification: >-
+      cert-manager Helm chart. Cluster-issuer controller reads ACME
+      account-key Secrets bound to each cluster issuer.
+
+  - avd_id: AVD-KSV-0041
+    target_kind: ClusterRole
+    target_name: cert-manager-controller-issuers
+    reason: vendor-helm
+    justification: >-
+      cert-manager Helm chart. Namespaced issuer controller; same rationale.
+
+  - avd_id: AVD-KSV-0041
+    target_kind: ClusterRole
+    target_name: cert-manager-controller-orders
+    reason: vendor-helm
+    justification: >-
+      cert-manager Helm chart. ACME order controller stores intermediate
+      Secrets per certificate-issuance order.
+
+  - avd_id: AVD-KSV-0041
+    target_kind: ClusterRole
+    target_name: ingress-nginx
+    reason: vendor-helm
+    justification: >-
+      ingress-nginx Helm chart. Controller reads TLS Secrets referenced by
+      Ingress objects to terminate HTTPS at the edge.
+
+  # -------------------------------------------------------------------------
+  # This project's own scanner — only relevant when rbac.scanSecrets=true.
+  # -------------------------------------------------------------------------
+  - avd_id: AVD-KSV-0041
+    target_kind: ClusterRole
+    target_name: security-dashboard-trivy-scanner
+    reason: app-by-design
+    justification: >-
+      This dashboard's Trivy scanner SA. Secrets read is opt-in
+      (rbac.scanSecrets Helm value, off by default) and enables Trivy to flag
+      credentials baked into Secret YAMLs (AWS keys, JWT signing keys, etc.).
+      The SA is read-only (no write/delete) and the scan Jobs are transient.
+
+  - avd_id: AVD-KSV-0012
+    target_kind: Job
+    target_name_pattern: "trivy-*"
+    reason: app-by-design
+    justification: >-
+      This dashboard's own Trivy scan Jobs. The Trivy container runs root
+      internally for filesystem scanning of image layers. Jobs are transient
+      (auto-GC'd after completion) and run isolated per scan. Pattern matches
+      every dynamically-named scan Job (trivy-<variant>-<id>).
+
+  # -------------------------------------------------------------------------
+  # kubeadm built-ins: kube-proxy DaemonSet + control-plane static pods.
+  # Glob patterns cover kube-apiserver-<nodename> etc. on every node.
+  # -------------------------------------------------------------------------
+  - avd_id: AVD-KSV-0017
+    target_kind: DaemonSet
+    target_name: kube-proxy
+    reason: built-in-k8s
+    justification: >-
+      kube-proxy is the built-in Kubernetes service proxy. It mutates the
+      host's iptables/ipvs/nftables rules at runtime; that requires
+      `privileged: true` (or at minimum NET_ADMIN + SYS_MODULE). kubeadm
+      deploys this DaemonSet at cluster bootstrap; modifying it is unsafe.
+
+  - avd_id: AVD-KSV-0009
+    target_kind: DaemonSet
+    target_name: kube-proxy
+    reason: built-in-k8s
+    justification: >-
+      kube-proxy uses hostNetwork so it can configure node-level traffic
+      rules and observe host conntrack. Built-in K8s DaemonSet from kubeadm.
+
+  - avd_id: AVD-KSV-0009
+    target_kind: Pod
+    target_name_pattern: "etcd-*"
+    reason: built-in-k8s
+    justification: >-
+      kubeadm static etcd Pods. etcd binds to 2379/2380 on the host
+      network for client/peer traffic; this is how the apiserver reaches
+      it on each control-plane node.
+
+  - avd_id: AVD-KSV-0009
+    target_kind: Pod
+    target_name_pattern: "kube-apiserver-*"
+    reason: built-in-k8s
+    justification: >-
+      kubeadm static kube-apiserver Pods. The apiserver binds 6443 on the
+      host (advertised to clients); needs hostNetwork.
+
+  - avd_id: AVD-KSV-0009
+    target_kind: Pod
+    target_name_pattern: "kube-controller-manager-*"
+    reason: built-in-k8s
+    justification: >-
+      kubeadm static controller-manager Pods. Use hostNetwork so leader
+      election and webhook calls don't require pod-network availability
+      before CNI is up.
+
+  - avd_id: AVD-KSV-0009
+    target_kind: Pod
+    target_name_pattern: "kube-scheduler-*"
+    reason: built-in-k8s
+    justification: >-
+      kubeadm static scheduler Pods. Same rationale as controller-manager
+      — leader election before CNI.
+
+  - avd_id: AVD-KSV-0001
+    target_kind: DaemonSet
+    target_name: kube-proxy
+    reason: built-in-k8s
+    justification: >-
+      kube-proxy mutates host iptables; runs root with the default vendor
+      pod spec. kubeadm-deployed; modifying would be reverted on cluster
+      upgrade.
+
+  - avd_id: AVD-KSV-0001
+    target_kind: Pod
+    target_name_pattern: "etcd-*"
+    reason: built-in-k8s
+    justification: kubeadm static etcd Pods.
+
+  - avd_id: AVD-KSV-0001
+    target_kind: Pod
+    target_name_pattern: "kube-apiserver-*"
+    reason: built-in-k8s
+    justification: kubeadm static kube-apiserver Pods.
+
+  - avd_id: AVD-KSV-0001
+    target_kind: Pod
+    target_name_pattern: "kube-controller-manager-*"
+    reason: built-in-k8s
+    justification: kubeadm static kube-controller-manager Pods.
+
+  - avd_id: AVD-KSV-0001
+    target_kind: Pod
+    target_name_pattern: "kube-scheduler-*"
+    reason: built-in-k8s
+    justification: kubeadm static kube-scheduler Pods.
+
+  - avd_id: AVD-KSV-0012
+    target_kind: DaemonSet
+    target_name: kube-proxy
+    reason: built-in-k8s
+    justification: kube-proxy runs as root by design (iptables/ipvs).
+
+  - avd_id: AVD-KSV-0012
+    target_kind: Deployment
+    target_name: coredns
+    reason: built-in-k8s
+    justification: >-
+      kube-system CoreDNS Deployment. kubeadm-managed; vendor pod spec.
+
+  - avd_id: AVD-KSV-0012
+    target_kind: Pod
+    target_name_pattern: "etcd-*"
+    reason: built-in-k8s
+    justification: kubeadm static etcd Pods.
+
+  - avd_id: AVD-KSV-0012
+    target_kind: Pod
+    target_name_pattern: "kube-apiserver-*"
+    reason: built-in-k8s
+    justification: kubeadm static kube-apiserver Pods.
+
+  - avd_id: AVD-KSV-0012
+    target_kind: Pod
+    target_name_pattern: "kube-controller-manager-*"
+    reason: built-in-k8s
+    justification: kubeadm static kube-controller-manager Pods.
+
+  - avd_id: AVD-KSV-0012
+    target_kind: Pod
+    target_name_pattern: "kube-scheduler-*"
+    reason: built-in-k8s
+    justification: kubeadm static kube-scheduler Pods.
+
+  - avd_id: AVD-KSV-0022
+    target_kind: Deployment
+    target_name: coredns
+    reason: built-in-k8s
+    justification: >-
+      kube-system CoreDNS Deployment. Vendor pod spec does not drop
+      NET_RAW; kubeadm-managed.
+
+  - avd_id: AVD-KSV-0023
+    target_kind: DaemonSet
+    target_name: kube-proxy
+    reason: built-in-k8s
+    justification: kube-proxy mounts /lib/modules from host for IPVS kernel modules.
+
+  - avd_id: AVD-KSV-0023
+    target_kind: Pod
+    target_name_pattern: "etcd-*"
+    reason: built-in-k8s
+    justification: kubeadm etcd Pods. /var/lib/etcd is hostPath by design.
+
+  - avd_id: AVD-KSV-0023
+    target_kind: Pod
+    target_name_pattern: "kube-apiserver-*"
+    reason: built-in-k8s
+    justification: >-
+      kubeadm kube-apiserver. Mounts /etc/kubernetes/pki and /etc/ssl/certs
+      from host.
+
+  - avd_id: AVD-KSV-0023
+    target_kind: Pod
+    target_name_pattern: "kube-controller-manager-*"
+    reason: built-in-k8s
+    justification: kubeadm kube-controller-manager. Mounts /etc/kubernetes.
+
+  - avd_id: AVD-KSV-0023
+    target_kind: Pod
+    target_name_pattern: "kube-scheduler-*"
+    reason: built-in-k8s
+    justification: kubeadm kube-scheduler. Mounts /etc/kubernetes/scheduler.conf.
+
+  - avd_id: AVD-KSV-0104
+    target_kind: DaemonSet
+    target_name: kube-proxy
+    reason: built-in-k8s
+    justification: kube-proxy; kubeadm-deployed vendor pod spec.
+
+  - avd_id: AVD-KSV-0104
+    target_kind: Deployment
+    target_name: coredns
+    reason: built-in-k8s
+    justification: kube-system CoreDNS.
+
+  - avd_id: AVD-KSV-0111
+    target_kind: ClusterRoleBinding
+    target_name: cluster-admin
+    reason: built-in-k8s
+    justification: >-
+      Built-in cluster-admin binding (group: system:masters). Removing
+      breaks bootstrap kubeconfigs and emergency-admin access.
+
+  - avd_id: AVD-KSV-0111
+    target_kind: ClusterRoleBinding
+    target_name: "kubeadm:cluster-admins"
+    reason: built-in-k8s
+    justification: >-
+      kubeadm-installed admin binding (group: kubeadm:cluster-admins).
+      Mirror of cluster-admin used for kubeadm-generated admin certs.
