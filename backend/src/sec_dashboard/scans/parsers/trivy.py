@@ -122,6 +122,7 @@ def _parse_resource_findings(resources: list[dict]) -> list[dict]:
                         "fixed": v.get("FixedVersion"),
                         "cvss": v.get("CVSS"),
                         "primary_url": v.get("PrimaryURL"),
+                        "references": (v.get("References") or [])[:10],
                         "target": target,
                     },
                 ))

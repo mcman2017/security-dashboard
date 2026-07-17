@@ -63,6 +63,7 @@ def _scan_to_dict(s: Scan, *, include_findings: bool = False) -> dict[str, Any]:
 
 def _finding_to_dict(f: Finding) -> dict[str, Any]:
     return {
+        "id": f.id,
         "severity_normalized": f.severity_normalized,
         "severity_original": f.severity_original,
         "scanner_id": f.scanner_id,
@@ -276,6 +277,61 @@ class ScanManager:
                 )
             out2.sort(key=_sort_key, reverse=True)
             return out2
+
+    async def get_finding(self, finding_id: int) -> dict | None:
+        """One finding by DB id, annotated with its scan's metadata and the
+        other occurrences of the same CVE/check id (`also_affects`) so the
+        detail view can show every image/workload hit by the same issue."""
+        if settings.mock:
+            return None
+        sm = get_sessionmaker()
+        async with sm() as sess:
+            res = await sess.execute(select(Finding).where(Finding.id == finding_id))
+            f = res.scalar_one_or_none()
+            if f is None:
+                return None
+            d = _finding_to_dict(f)
+            scan_res = await sess.execute(
+                select(Scan.id, Scan.scanner, Scan.variant, Scan.started_at)
+                .where(Scan.id == f.scan_id)
+            )
+            row = scan_res.first()
+            if row:
+                sid, scanner, variant, started_at = row
+                d["scan"] = {
+                    "id": sid,
+                    "scanner": scanner,
+                    "variant": variant,
+                    "started_at": started_at.isoformat() if started_at else None,
+                }
+            else:
+                d["scan"] = {"id": f.scan_id}
+            d["also_affects"] = []
+            if f.scanner_id:
+                others = await sess.execute(
+                    select(
+                        Finding.id,
+                        Finding.resource_ns,
+                        Finding.resource_kind,
+                        Finding.resource_name,
+                        Finding.image,
+                    )
+                    .where(Finding.scanner_id == f.scanner_id)
+                    .where(Finding.id != f.id)
+                    .order_by(Finding.id)
+                    .limit(200)
+                )
+                d["also_affects"] = [
+                    {
+                        "id": oid,
+                        "resource_ns": ons,
+                        "resource_kind": okind,
+                        "resource_name": oname,
+                        "image": oimage,
+                    }
+                    for oid, ons, okind, oname, oimage in others.all()
+                ]
+            return d
 
     async def get_raw(self, scan_id: str) -> dict | None:
         if settings.mock:

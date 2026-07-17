@@ -27,6 +27,7 @@ export interface ScanSummary {
 }
 
 export interface FindingWithScan {
+  id?: number; // absent from backends older than the detail-page feature
   severity_normalized: number;
   severity_original: string;
   scanner_id: string | null;
@@ -40,6 +41,20 @@ export interface FindingWithScan {
   evidence: Record<string, unknown> | null;
   ecosystem_bucket: boolean;
   scan: { id: string; scanner: string; variant: string | null; started_at: string | null };
+}
+
+// Another image/workload hit by the same CVE/check, listed on the detail page.
+export interface FindingOccurrence {
+  id: number;
+  resource_ns: string | null;
+  resource_kind: string | null;
+  resource_name: string | null;
+  image: string | null;
+}
+
+export interface FindingDetailResponse extends FindingWithScan {
+  id: number;
+  also_affects: FindingOccurrence[];
 }
 
 export type TrivyVariant = 'cis' | 'nsa' | 'vuln';
@@ -68,6 +83,8 @@ export const scansApi = {
     req<{ severity: SeverityLabel; total: number; findings: FindingWithScan[] }>(
       `/findings/by-severity/${encodeURIComponent(sev)}`
     ),
+  finding: (id: number | string) =>
+    req<FindingDetailResponse>(`/findings/${encodeURIComponent(id)}`),
 };
 
 // The three launchable Trivy scans, in display order.

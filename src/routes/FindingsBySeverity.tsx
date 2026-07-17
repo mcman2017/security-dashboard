@@ -4,25 +4,22 @@
 // dash backend's /findings/by-severity/:sev endpoint.
 import { CommonComponents } from '@kinvolk/headlamp-plugin/lib';
 import { Alert, Box, Link as MuiLink, Stack, Typography } from '@mui/material';
-import { ReactNode, useMemo } from 'react';
+import { useMemo } from 'react';
+import { useHistory } from 'react-router';
 import { Link as RouterLink } from 'react-router-dom';
 import { SeverityBadge } from '../components/SeverityBadge';
+import { SortableFindingsTable } from '../components/SortableFindingsTable';
 import { FindingWithScan, scansApi } from '../lib/api';
 import { SCANS_PATHS, useClusterUrl, useSeverityFilter } from '../lib/nav';
 import { fromTrivy, SeverityLabel } from '../lib/severity';
 import { usePolling } from '../lib/usePolling';
 
-const { SectionBox, SectionHeader, SimpleTable } = CommonComponents;
-
-function resourceOf(f: FindingWithScan): string {
-  const parts = [f.resource_ns, f.resource_kind, f.resource_name].filter(Boolean);
-  if (f.image) parts.push(f.image);
-  return parts.join('/') || '—';
-}
+const { SectionBox, SectionHeader } = CommonComponents;
 
 export function FindingsBySeverity() {
   const sev = useSeverityFilter(); // SeverityLabel | null (from ?severity=)
   const build = useClusterUrl();
+  const history = useHistory();
   const label = (sev ?? 'CRITICAL') as SeverityLabel;
 
   const { data, error, loading } = usePolling(
@@ -34,12 +31,11 @@ export function FindingsBySeverity() {
   const total = data?.total ?? 0;
   const scanCount = useMemo(() => new Set(findings.map(f => f.scan.id)).size, [findings]);
 
-  const scanCell = (f: FindingWithScan): ReactNode => (
-    <Typography variant="caption" color="text.secondary">
-      {f.scan.scanner}
-      {f.scan.variant ? ` · ${f.scan.variant}` : ''}
-    </Typography>
-  );
+  const openFinding = (f: FindingWithScan) => {
+    // Old backends don't serve finding ids yet — leave the row inert.
+    if (f.id === undefined) return;
+    history.push(build(`/security-scans/finding/${f.id}`));
+  };
 
   if (!sev) {
     return (
@@ -82,17 +78,9 @@ export function FindingsBySeverity() {
           </Alert>
         ) : null}
 
-        <SimpleTable
-          data={findings}
-          rowsPerPage={[25, 50, 100]}
-          showPagination
-          columns={[
-            { label: 'ID', getter: (f: FindingWithScan) => f.scanner_id ?? f.control_id ?? '—' },
-            { label: 'Title', getter: (f: FindingWithScan) => f.title },
-            { label: 'Resource', getter: (f: FindingWithScan) => resourceOf(f) },
-            { label: 'Original', getter: (f: FindingWithScan) => f.severity_original || '—' },
-            { label: 'Scan', getter: scanCell },
-          ]}
+        <SortableFindingsTable
+          findings={findings}
+          onRowClick={openFinding}
           emptyMessage={
             loading ? 'Loading findings…' : `No ${label} findings across any completed scan.`
           }
