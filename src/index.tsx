@@ -6,6 +6,7 @@
 import { registerRoute, registerSidebarEntry } from '@kinvolk/headlamp-plugin/lib';
 import { Compliance } from './routes/Compliance';
 import { Configuration } from './routes/Configuration';
+import { FindingDetail } from './routes/FindingDetail';
 import { FindingsBySeverity } from './routes/FindingsBySeverity';
 import { HostOS } from './routes/HostOS';
 import { Overview } from './routes/Overview';
@@ -129,4 +130,13 @@ registerRoute({
   sidebar: 'security-scans-overview',
   name: 'Findings by severity',
   component: FindingsBySeverity,
+});
+// Single-finding detail page — reached by clicking a row on the
+// findings-by-severity pages. Highlights the Overview sidebar entry.
+registerRoute({
+  path: `${BASE}/finding/:id`,
+  exact: true,
+  sidebar: 'security-scans-overview',
+  name: 'Finding detail',
+  component: FindingDetail,
 });

@@ -1,6 +1,6 @@
 {
   "name": "headlamp-security-dashboard",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Security dashboard for Headlamp — on-demand Trivy scans (CIS / NSA / vulnerabilities), Trivy Operator reports, suppressions workflow, and host-OS scans",
   "license": "Apache-2.0",
   "homepage": "https://github.com/mcman2017/security-dashboard",

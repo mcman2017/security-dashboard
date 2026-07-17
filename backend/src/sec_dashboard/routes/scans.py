@@ -86,3 +86,13 @@ async def findings_by_severity(severity: str) -> dict:
         )
     findings = await manager.findings_by_severity(_SEVERITY_LABEL_TO_INT[label])
     return {"severity": label, "total": len(findings), "findings": findings}
+
+
+@router.get("/findings/{finding_id}")
+async def get_finding(finding_id: int) -> dict:
+    """Single finding with scan metadata and its other occurrences
+    (`also_affects`). Backs the per-finding detail page."""
+    finding = await manager.get_finding(finding_id)
+    if finding is None:
+        raise HTTPException(status_code=404, detail=f"finding {finding_id} not found")
+    return finding
