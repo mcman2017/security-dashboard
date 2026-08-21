@@ -39,6 +39,37 @@ roleRef:
   name: security-dashboard-backend
   apiGroup: rbac.authorization.k8s.io
 ---
+{{- if .Values.lynis.enabled }}
+# Cluster-wide node read for the backend itself — the ONE exception to the
+# "backend needs no cluster-wide access" rule above: launching a Lynis host
+# audit lists the nodes to fan out one Job per node.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: security-dashboard-backend-nodes
+  labels:
+    {{- include "security-dashboard.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: security-dashboard-backend-nodes
+  labels:
+    {{- include "security-dashboard.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.serviceAccounts.backend }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: security-dashboard-backend-nodes
+  apiGroup: rbac.authorization.k8s.io
+---
+{{- end }}
 # Cluster-wide read for the `trivy k8s` scan. get/list only. Secrets access is
 # opt-in (rbac.scanSecrets) — with it, Trivy can flag credentials embedded in
 # Secret YAMLs; without it, Trivy logs "forbidden" warnings and skips those
