@@ -72,6 +72,8 @@ def test_command_audits_host_and_publishes_atomically():
     assert f"trap 'rm -rf /host{work}' EXIT" in script
     # lynis writes report.dat 0640 root:root; api reads as uid 1000
     assert "chmod 644" in script
+    # api (uid 1000) must own the per-scan dir to rmtree it after ingestion
+    assert f"chown 1000:1000 /scan-results/{SCAN_ID}" in script
     # atomic publish
     dest = f"/scan-results/{SCAN_ID}/worker-1.dat"
     assert f"cp /host{work}/report.dat {dest}.tmp" in script

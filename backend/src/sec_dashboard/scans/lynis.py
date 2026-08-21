@@ -78,9 +78,11 @@ def _scanner_command(scan_id: str, node_name: str) -> list[str]:
         f"printf 'skip-test=PLGN-3814\\n' > {HOST_MOUNT}{work}/lynis/custom.prf; "
         f'chroot {HOST_MOUNT} /bin/sh -c "{audit}"; '
         f'[ -s {HOST_MOUNT}{work}/report.dat ] || {{ echo "no report produced"; tail -50 {HOST_MOUNT}{work}/lynis.log; exit 1; }}; '
-        f"mkdir -p {SCAN_RESULTS_MOUNT}/{scan_id} && "
-        # Lynis writes report.dat 0640 root:root; the api reads the PVC as
-        # uid 1000, so widen before publishing.
+        # chown: the api (uid 1000) must be able to rmtree this dir after
+        # ingestion — owning the directory grants unlink even though the
+        # files inside stay root-owned. chmod 644: lynis writes report.dat
+        # 0640 root:root and the api needs to read it.
+        f"mkdir -p {SCAN_RESULTS_MOUNT}/{scan_id} && chown 1000:1000 {SCAN_RESULTS_MOUNT}/{scan_id} && "
         f"cp {HOST_MOUNT}{work}/report.dat {dest}.tmp && chmod 644 {dest}.tmp && mv {dest}.tmp {dest}",
     ]
 
