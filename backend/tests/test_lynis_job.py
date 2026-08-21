@@ -46,11 +46,12 @@ def test_privileged_scanner_and_mounts():
     container = pod["containers"][0]
     assert container["securityContext"] == {"privileged": True}
     mounts = {m["name"]: m for m in container["volumeMounts"]}
-    assert mounts["rootfs"]["mountPath"] == "/rootfs"
-    assert mounts["rootfs"]["readOnly"] is True
+    # rw host mount — the chroot'ed audit writes into a host temp dir
+    assert mounts["host-root"]["mountPath"] == "/host"
+    assert "readOnly" not in mounts["host-root"]
     assert mounts["scan-results"]["mountPath"] == "/scan-results"
     volumes = {v["name"]: v for v in pod["volumes"]}
-    assert volumes["rootfs"]["hostPath"] == {"path": "/", "type": "Directory"}
+    assert volumes["host-root"]["hostPath"] == {"path": "/", "type": "Directory"}
     assert volumes["scan-results"]["persistentVolumeClaim"]["claimName"] == settings.scan_results_pvc
 
 
@@ -58,16 +59,22 @@ def test_command_audits_host_and_publishes_atomically():
     cmd = _job()["spec"]["template"]["spec"]["containers"][0]["command"]
     assert cmd[:2] == ["sh", "-c"]
     script = cmd[2]
-    # host (not container) audit
-    assert "--rootdir /rootfs/" in script
-    assert "--forensics" in script
+    work = f"/tmp/lynis-audit-{SCAN_ID[:8]}"
+    # HOST (not container) audit: lynis tree copied onto the host, run chroot'ed
+    assert f"cp -a /opt/lynis /host{work}/lynis" in script
+    assert 'chroot /host /bin/sh -c "' in script
+    assert "lynis audit system" in script
+    # journal-verify hangs for tens of minutes on real hosts — must be skipped
+    assert "skip-test=PLGN-3814" in script
     # readable stdout stays in the job log
     assert "--quiet" not in script
+    # host temp dir is removed however the audit ends
+    assert f"trap 'rm -rf /host{work}' EXIT" in script
     # lynis writes report.dat 0640 root:root; api reads as uid 1000
     assert "chmod 644" in script
     # atomic publish
     dest = f"/scan-results/{SCAN_ID}/worker-1.dat"
-    assert f"cp /tmp/report.dat {dest}.tmp" in script
+    assert f"cp /host{work}/report.dat {dest}.tmp" in script
     assert f"mv {dest}.tmp {dest}" in script
     # missing report is a loud failure, not a silent success
     assert "exit 1" in script

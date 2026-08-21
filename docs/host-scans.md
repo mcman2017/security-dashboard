@@ -15,9 +15,12 @@ Both are disabled by default in the Helm chart.
 Launching a Lynis scan — from the Host OS page's button, `POST /api/scans`
 `{"scanner": "lynis"}`, or the daily schedule — makes the backend create one Job per
 cluster node (control-plane nodes included; the pod pins with `nodeName` and tolerates
-all taints). Each Job runs a [Lynis](https://cisofy.com/lynis/) system audit against the
-host filesystem, mounted read-only at `/rootfs` (`--forensics --rootdir /rootfs/`), writes
-`report.dat` to the shared scan-results PVC, and the backend parses it into findings:
+all taints). Each Job copies the [Lynis](https://cisofy.com/lynis/) script tree onto the
+node and runs the system audit **chroot'ed into the host root** (bind-mounted at
+`/host`), so OS detection, package inventory, and service checks genuinely audit the
+node — Lynis's `--rootdir` flag alone only redirects some file checks while still
+inventorying the container. The Job writes `report.dat` to the shared scan-results PVC,
+and the backend parses it into findings:
 warnings → MEDIUM, suggestions → LOW, plus one INFO finding per node carrying the
 hardening index. The raw `report.dat` for every node stays viewable on the scan's detail
 page.
@@ -43,11 +46,21 @@ kubectl label namespace security-dashboard \
   pod-security.kubernetes.io/enforce=privileged --overwrite
 ```
 
-There is no official upstream Lynis container image, so you provide one:
+There is no official upstream Lynis container image, so you provide one. The scan Job
+expects the portable Lynis source tree at `/opt/lynis` (it copies that tree into the
+host chroot), so build from the upstream tag rather than a distro package:
 
 ```dockerfile
-FROM alpine:3.20
-RUN apk add --no-cache lynis
+FROM debian:bookworm-slim
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        bash coreutils procps file lsof net-tools ca-certificates git && \
+    git clone --depth 1 --branch 3.1.6 \
+        https://github.com/CISOfy/lynis.git /opt/lynis && \
+    rm -rf /opt/lynis/.git && \
+    ln -s /opt/lynis/lynis /usr/local/bin/lynis && \
+    apt-get purge -y git && apt-get autoremove -y && apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 ```
 
 Build it **multi-arch** if your nodes mix CPU architectures — a single-arch image fails
