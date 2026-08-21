@@ -61,6 +61,13 @@ spec:
             {{- if .Values.lynis.enabled }}
             - name: SEC_DASHBOARD_LYNIS_IMAGE
               value: {{ required "lynis.image is required when lynis.enabled=true (see docs/host-scans.md)" .Values.lynis.image | quote }}
+            {{- if .Values.imagePullSecrets }}
+            {{- $names := list }}
+            {{- range .Values.imagePullSecrets }}{{- $names = append $names .name }}{{- end }}
+            # The lynis Jobs reuse the release's pull secrets (private registry).
+            - name: SEC_DASHBOARD_LYNIS_IMAGE_PULL_SECRETS
+              value: {{ $names | join "," | quote }}
+            {{- end }}
             {{- end }}
             {{- if .Values.suppressions.enabled }}
             - name: SEC_DASHBOARD_SUPPRESSIONS_PATH

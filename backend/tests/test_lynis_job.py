@@ -81,6 +81,17 @@ def test_node_name_sanitized_for_job_name():
     assert job["metadata"]["labels"]["security-dashboard/job-target"] == "Node.Example_01"
 
 
+def test_image_pull_secrets():
+    settings.lynis_image = "example/lynis:test"
+    settings.lynis_image_pull_secrets = ""
+    pod = build_job(SCAN_ID, "n1", False)["spec"]["template"]["spec"]
+    assert "imagePullSecrets" not in pod
+    settings.lynis_image_pull_secrets = "regcred, other"
+    pod = build_job(SCAN_ID, "n1", False)["spec"]["template"]["spec"]
+    assert pod["imagePullSecrets"] == [{"name": "regcred"}, {"name": "other"}]
+    settings.lynis_image_pull_secrets = ""
+
+
 def test_job_spec_safety_caps():
     spec = _job()["spec"]
     assert spec["backoffLimit"] == 0

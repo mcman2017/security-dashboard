@@ -65,6 +65,11 @@ def build_job(scan_id: str, node_name: str, is_control_plane: bool) -> dict:
         "security-dashboard/job-target": node_name,
         "security-dashboard/job-role": "cp" if is_control_plane else "node",
     }
+    pull_secrets = [
+        {"name": s.strip()}
+        for s in settings.lynis_image_pull_secrets.split(",")
+        if s.strip()
+    ]
     return {
         "apiVersion": "batch/v1",
         "kind": "Job",
@@ -83,6 +88,7 @@ def build_job(scan_id: str, node_name: str, is_control_plane: bool) -> dict:
                     "restartPolicy": "Never",
                     # Lynis makes no K8s API calls — default SA, no token.
                     "automountServiceAccountToken": False,
+                    **({"imagePullSecrets": pull_secrets} if pull_secrets else {}),
                     "nodeName": node_name,
                     "hostPID": True,
                     "hostNetwork": True,

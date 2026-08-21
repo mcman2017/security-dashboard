@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     # value `lynis.image`. Empty = the lynis scanner is unavailable and
     # launching it returns an actionable error.
     lynis_image: str = ""
+    # Comma-separated imagePullSecret names for the lynis Jobs — needed when
+    # lynis_image lives in a private registry. Empty = none.
+    lynis_image_pull_secrets: str = ""
     # Per-node Job cap. A full `lynis audit system` normally takes 2-5 min;
     # the cap only bounds hung nodes so a scan can't stay "running" forever.
     lynis_job_deadline_s: int = 1_800
