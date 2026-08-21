@@ -1,38 +1,47 @@
 # Host OS scanners
 
-The plugin's **Security Scans → Host OS** page surfaces two optional scanners that audit the
-*nodes* rather than the workloads. Both are disabled by default in the Helm chart and run in
-their own namespace (`hostScanners.namespace`, default `trivy-system` — the namespace the
-plugin's Host OS page reads pod logs from).
+The plugin's **Security Scans → Host OS** page surfaces two scanners that audit the
+*nodes* rather than the workloads:
 
-Enable them via chart values:
+- **Lynis host audit** — a first-class scanner orchestrated by the backend: one Job per
+  cluster node, results parsed into findings (severities, per-node hardening index, history)
+  like the Trivy scans.
+- **trivy rootfs** — an optional DaemonSet whose per-node logs are shown raw on the page.
+
+Both are disabled by default in the Helm chart.
+
+## Lynis host audit (backend-orchestrated, per node)
+
+Launching a Lynis scan — from the Host OS page's button, `POST /api/scans`
+`{"scanner": "lynis"}`, or the daily schedule — makes the backend create one Job per
+cluster node (control-plane nodes included; the pod pins with `nodeName` and tolerates
+all taints). Each Job runs a [Lynis](https://cisofy.com/lynis/) system audit against the
+host filesystem, mounted read-only at `/rootfs` (`--forensics --rootdir /rootfs/`), writes
+`report.dat` to the shared scan-results PVC, and the backend parses it into findings:
+warnings → MEDIUM, suggestions → LOW, plus one INFO finding per node carrying the
+hardening index. The raw `report.dat` for every node stays viewable on the scan's detail
+page.
+
+Enable via chart values:
 
 ```yaml
-hostScanners:
-  namespace: trivy-system
-  createNamespace: true      # labels it PSS privileged
-  trivyRootfs:
-    enabled: true
-  lynis:
-    enabled: true
-    image: ghcr.io/you/lynis:3.1.6   # you must provide this — see below
-    schedule: "0 3 * * *"
-    # nodeSelector: { kubernetes.io/hostname: my-node }   # pin to one node
+lynis:
+  enabled: true
+  image: ghcr.io/you/lynis:3.1.6   # you must provide this — see below
+  schedule:
+    enabled: true        # daily scheduled scan (a CronJob POSTs the launch)
+    cron: "30 3 * * *"
+    timeZone: ""         # optional, needs Kubernetes >= 1.27
 ```
 
-## trivy rootfs (DaemonSet, per node)
+The audit Jobs run **privileged with hostPID** in the release namespace (Lynis inspects
+host processes, kernel parameters, and the mounted root filesystem), so the namespace must
+allow it:
 
-Runs `trivy rootfs --severity HIGH,CRITICAL` against the host filesystem (mounted read-only
-at `/host`) in a daily loop, one pod per node. Kernel/runtime state and container snapshot
-directories are skipped so image contents aren't double-scanned; add cluster-specific paths
-with `hostScanners.trivyRootfs.extraSkipDirs` (e.g. a non-default containerd root).
-
-The pod runs as root with a read-only host mount, but is *not* privileged.
-
-## Lynis audit (CronJob, daily)
-
-Runs a [Lynis](https://cisofy.com/lynis/) system audit and prints the report to the pod log.
-Privileged + hostPID (Lynis inspects host processes and the mounted root filesystem).
+```bash
+kubectl label namespace security-dashboard \
+  pod-security.kubernetes.io/enforce=privileged --overwrite
+```
 
 There is no official upstream Lynis container image, so you provide one:
 
@@ -41,12 +50,34 @@ FROM alpine:3.20
 RUN apk add --no-cache lynis
 ```
 
+Build it **multi-arch** if your nodes mix CPU architectures — a single-arch image fails
+with `exec format error` on the other nodes:
+
 ```bash
-docker build -t ghcr.io/you/lynis:3.1.6 . && docker push ghcr.io/you/lynis:3.1.6
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -t ghcr.io/you/lynis:3.1.6 --push .
 ```
 
-Trigger a run manually without waiting for the schedule:
+The scan-results PVC is shared by up to one writer per node during a Lynis scan, so its
+access mode must be `ReadWriteMany` on multi-node clusters (the chart default).
 
-```bash
-kubectl create job --from=cronjob/lynis-host-audit lynis-manual -n trivy-system
+## trivy rootfs (DaemonSet, per node)
+
+Runs `trivy rootfs --severity HIGH,CRITICAL` against the host filesystem (mounted read-only
+at `/host`) in a daily loop, one pod per node, in its own namespace
+(`hostScanners.namespace`, default `trivy-system` — the namespace the plugin's Host OS page
+reads pod logs from). Kernel/runtime state and container snapshot directories are skipped so
+image contents aren't double-scanned; add cluster-specific paths with
+`hostScanners.trivyRootfs.extraSkipDirs` (e.g. a non-default containerd root).
+
+The pod runs as root with a read-only host mount, but is *not* privileged.
+
+Enable via chart values:
+
+```yaml
+hostScanners:
+  namespace: trivy-system
+  createNamespace: true      # labels it PSS privileged
+  trivyRootfs:
+    enabled: true
 ```

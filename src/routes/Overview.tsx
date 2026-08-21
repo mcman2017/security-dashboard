@@ -27,7 +27,7 @@ import { ReactNode, useMemo, useState } from 'react';
 import { useHistory } from 'react-router';
 import { SeverityBadge } from '../components/SeverityBadge';
 import { StatCards } from '../components/StatCards';
-import { SCAN_CHOICES, scansApi, ScanSummary, SummaryCounts, TrivyVariant } from '../lib/api';
+import { SCAN_CHOICES, scansApi, ScanSummary, SummaryCounts } from '../lib/api';
 import { SCANS_PATHS, useClusterUrl } from '../lib/nav';
 import { emptyCounts, Severity, SEVERITY_ORDER, severityLabel } from '../lib/severity';
 import { usePolling } from '../lib/usePolling';
@@ -35,6 +35,12 @@ import { usePolling } from '../lib/usePolling';
 const { SectionBox, SectionHeader, SimpleTable } = CommonComponents;
 
 const VARIANT_LABEL: Record<string, string> = { cis: 'CIS', nsa: 'NSA', vuln: 'Full Vulnerability' };
+const SCANNER_LABEL: Record<string, string> = { trivy: 'Trivy', lynis: 'Lynis' };
+
+function variantCell(s: ScanSummary): string {
+  if (s.scanner === 'lynis') return 'all nodes';
+  return VARIANT_LABEL[s.variant ?? ''] ?? s.variant ?? '—';
+}
 
 function fmtDate(iso: string | null): string {
   if (!iso) return '—';
@@ -72,7 +78,7 @@ export function Overview() {
   const build = useClusterUrl();
   const { data, error, loading, refetch } = usePolling(scansApi.list, 5000);
 
-  const [launching, setLaunching] = useState<TrivyVariant | null>(null);
+  const [launching, setLaunching] = useState<string | null>(null);
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [toDelete, setToDelete] = useState<ScanSummary | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -86,11 +92,11 @@ export function Overview() {
     history.push(build(SCANS_PATHS.findings, { severity: severityLabel(s) }));
   };
 
-  async function launch(variant: TrivyVariant) {
-    setLaunching(variant);
+  async function launch(choice: (typeof SCAN_CHOICES)[number]) {
+    setLaunching(choice.label);
     setLaunchError(null);
     try {
-      await scansApi.launch(variant);
+      await scansApi.launch(choice.scanner, choice.variant);
       await refetch();
     } catch (e: any) {
       setLaunchError(e?.message ? String(e.message) : 'launch failed');
@@ -153,7 +159,7 @@ export function Overview() {
         {/* 2. Launch a scan */}
         <Box>
           <Typography variant="subtitle1" sx={{ mb: 1 }}>
-            Launch a Trivy scan on this cluster
+            Launch a scan on this cluster
           </Typography>
           {launchError ? (
             <Alert severity="error" sx={{ mb: 1 }}>
@@ -162,19 +168,19 @@ export function Overview() {
           ) : null}
           <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
             {SCAN_CHOICES.map(c => (
-              <Tooltip key={c.variant} title={c.description}>
+              <Tooltip key={c.label} title={c.description}>
                 <span>
                   <Button
                     variant="contained"
                     disabled={launching !== null}
                     startIcon={
-                      launching === c.variant ? (
+                      launching === c.label ? (
                         <CircularProgress size={16} color="inherit" />
                       ) : (
                         <Icon icon="mdi:shield-search" width={18} height={18} />
                       )
                     }
-                    onClick={() => launch(c.variant)}
+                    onClick={() => launch(c)}
                   >
                     {c.label}
                   </Button>
@@ -197,11 +203,11 @@ export function Overview() {
             columns={[
               {
                 label: 'Scanner',
-                getter: (s: ScanSummary) => (s.scanner === 'trivy' ? 'Trivy' : s.scanner),
+                getter: (s: ScanSummary) => SCANNER_LABEL[s.scanner] ?? s.scanner,
               },
               {
                 label: 'Variant',
-                getter: (s: ScanSummary) => VARIANT_LABEL[s.variant ?? ''] ?? s.variant ?? '—',
+                getter: variantCell,
               },
               { label: 'Status', getter: (s: ScanSummary) => statusChip(s.status) },
               { label: 'Started', getter: (s: ScanSummary) => fmtDate(s.started_at) },
@@ -233,7 +239,7 @@ export function Overview() {
         <DialogTitle>Delete this scan?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            Permanently remove the {toDelete ? VARIANT_LABEL[toDelete.variant ?? ''] ?? toDelete.variant : ''}{' '}
+            Permanently remove the {toDelete ? `${SCANNER_LABEL[toDelete.scanner] ?? toDelete.scanner} ${variantCell(toDelete)}` : ''}{' '}
             scan from {fmtDate(toDelete?.started_at ?? null)} and its findings from persistent
             storage. Its counts will be subtracted from the rolled-up totals. This cannot be undone.
           </DialogContentText>

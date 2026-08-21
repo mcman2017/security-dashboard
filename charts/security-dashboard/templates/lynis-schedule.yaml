@@ -1,0 +1,73 @@
+{{- if and .Values.lynis.enabled .Values.lynis.schedule.enabled }}
+# Daily Lynis host-audit trigger. This CronJob does NOT run lynis itself —
+# it POSTs a scan launch to the backend API (same code path as the UI's
+# launch button), and the backend fans out one privileged Job per node.
+# Reuses the backend image purely because it's already present and has
+# Python; the pod is unprivileged and needs no K8s API access.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: security-dashboard-lynis-schedule
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "security-dashboard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: lynis-schedule
+spec:
+  schedule: {{ .Values.lynis.schedule.cron | quote }}
+  {{- with .Values.lynis.schedule.timeZone }}
+  timeZone: {{ . | quote }}
+  {{- end }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 300
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            {{- include "security-dashboard.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: lynis-schedule
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          containers:
+            - name: trigger
+              image: {{ include "security-dashboard.image" . }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: ["python", "-c"]
+              args:
+                - |
+                  import json, urllib.request
+                  req = urllib.request.Request(
+                      "http://security-dashboard-api.{{ .Release.Namespace }}.svc:80/api/scans",
+                      data=json.dumps({"scanner": "lynis"}).encode(),
+                      headers={"Content-Type": "application/json"},
+                      method="POST",
+                  )
+                  body = urllib.request.urlopen(req, timeout=30).read().decode()
+                  print("launched:", body)
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  memory: 128Mi
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000
+                runAsGroup: 1000
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+                seccompProfile:
+                  type: RuntimeDefault
+{{- end }}

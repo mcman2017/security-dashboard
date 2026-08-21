@@ -27,6 +27,16 @@ If your workload images live in private registries, give Trivy pull
 credentials (see the chart README) or switch to scan.mode=node-cache.
 {{- end }}
 
+{{- if .Values.lynis.enabled }}
+
+lynis.enabled=true: the per-node host-audit Jobs run privileged with hostPID
+and a read-only host mount, and require Pod Security Standards "privileged"
+on this namespace:
+
+  kubectl label namespace {{ .Release.Namespace }} \
+    pod-security.kubernetes.io/enforce=privileged --overwrite
+{{- end }}
+
 Next steps:
   1. Install the Security Dashboard plugin into Headlamp (desktop Plugin
      Catalog, or the headlamp chart's pluginsManager — see the project README).

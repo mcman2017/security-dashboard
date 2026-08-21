@@ -20,6 +20,12 @@ async def list_scanners() -> dict:
                     {"id": "vuln", "label": "Full vulnerability scan", "description": "CVE scan across all cluster images"},
                 ],
             },
+            {
+                "name": "lynis",
+                "label": "Lynis Host Audit",
+                "variants": [],
+                "description": "Host-OS hardening audit on every cluster node",
+            },
         ]
     }
 
