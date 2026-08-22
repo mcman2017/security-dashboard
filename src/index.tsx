@@ -9,6 +9,7 @@ import { Configuration } from './routes/Configuration';
 import { FindingDetail } from './routes/FindingDetail';
 import { FindingsBySeverity } from './routes/FindingsBySeverity';
 import { HostOS } from './routes/HostOS';
+import { LynisNodeDetail } from './routes/LynisNodeDetail';
 import { LynisScanDetail } from './routes/LynisScanDetail';
 import { Overview } from './routes/Overview';
 import { Rbac } from './routes/Rbac';
@@ -115,6 +116,15 @@ registerRoute({
   sidebar: 'security-scans-host',
   name: 'Lynis audit detail',
   component: LynisScanDetail,
+});
+// One node's slice of a Lynis audit — reached by clicking a node chip on the
+// audit detail page.
+registerRoute({
+  path: `${BASE}/host-os/scan/:id/node/:node`,
+  exact: true,
+  sidebar: 'security-scans-host',
+  name: 'Lynis node detail',
+  component: LynisNodeDetail,
 });
 registerRoute({
   path: `${BASE}/suppressions`,

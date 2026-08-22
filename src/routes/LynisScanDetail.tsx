@@ -1,6 +1,7 @@
-// Per-scan detail for a Lynis host audit: per-node hardening indexes, the
+// Per-scan detail for a Lynis host audit: per-node hardening indexes (click a
+// node to see just its findings), severity totals that filter the table, the
 // parsed findings across every node, and the raw report.dat bundle.
-// Reached from the Host OS page's scan list.
+// Reached from the Host OS page's scan list or its severity cards.
 import { Icon } from '@iconify/react';
 import { CommonComponents } from '@kinvolk/headlamp-plugin/lib';
 import {
@@ -11,40 +12,40 @@ import {
   Box,
   Chip,
   CircularProgress,
+  Link as MuiLink,
   Stack,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import { useCallback, useMemo, useState } from 'react';
 import { useHistory, useParams } from 'react-router';
+import { Link as RouterLink } from 'react-router-dom';
+import { SeverityFilterChip } from '../components/SeverityFilterChip';
 import { SortableFindingsTable } from '../components/SortableFindingsTable';
-import { Finding, FindingWithScan, scansApi } from '../lib/api';
-import { useClusterUrl } from '../lib/nav';
+import { StatCards } from '../components/StatCards';
+import { FindingWithScan, scansApi } from '../lib/api';
+import {
+  countBySeverity,
+  filterBySeverity,
+  fmtDate,
+  indexColor,
+  nodesOf,
+  SEVERITY_FROM_LABEL,
+  withScan,
+} from '../lib/lynis';
+import { SCANS_PATHS, useClusterUrl, useSeverityFilter } from '../lib/nav';
+import { Severity, severityLabel } from '../lib/severity';
 import { usePolling } from '../lib/usePolling';
 
 const { SectionBox, SectionHeader } = CommonComponents;
-
-const HARDENING_INDEX_ID = 'LYNIS-HARDENING-INDEX';
-
-function fmtDate(iso: string | null): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-// Color the hardening-index chip by score (Lynis's own rough banding).
-function indexColor(value: number): 'success' | 'warning' | 'error' | 'default' {
-  if (Number.isNaN(value)) return 'default';
-  if (value >= 75) return 'success';
-  if (value >= 55) return 'warning';
-  return 'error';
-}
 
 export function LynisScanDetail() {
   const { id } = useParams<{ id: string }>();
   const history = useHistory();
   const build = useClusterUrl();
+  const severity = useSeverityFilter();
+
+  const basePath = `${SCANS_PATHS.hostOs}/scan/${id}`;
 
   const fetchScan = useCallback(() => scansApi.get(id), [id]);
   const { data: scan, error, loading } = usePolling(fetchScan, 5000);
@@ -67,34 +68,20 @@ export function LynisScanDetail() {
     }
   }
 
-  const findings: Finding[] = scan?.findings ?? [];
+  // Every finding, hardening-index rows included, so the severity totals here
+  // line up with the Host OS page's counts (the index rows are INFO).
+  const all: FindingWithScan[] = useMemo(
+    () => (scan ? withScan(scan, scan.findings ?? []) : []),
+    [scan]
+  );
+  const nodes = useMemo(() => nodesOf(all), [all]);
+  const counts = useMemo(() => countBySeverity(all), [all]);
+  const visible = useMemo(() => filterBySeverity(all, severity), [all, severity]);
 
-  // Per-node hardening indexes come from the parser's synthetic INFO findings.
-  const hardeningByNode = useMemo(() => {
-    const out: Array<{ node: string; value: string }> = [];
-    for (const f of findings) {
-      if (f.scanner_id === HARDENING_INDEX_ID && f.resource_name) {
-        const value = String((f.evidence as any)?.hardening_index ?? '').trim();
-        out.push({ node: f.resource_name, value });
-      }
-    }
-    return out.sort((a, b) => a.node.localeCompare(b.node));
-  }, [findings]);
-
-  // Table shows the actionable warnings/suggestions; the index rows are
-  // already surfaced as chips above.
-  const tableFindings: FindingWithScan[] = useMemo(() => {
-    if (!scan) return [];
-    const meta = {
-      id: scan.id,
-      scanner: scan.scanner,
-      variant: scan.variant,
-      started_at: scan.started_at,
-    };
-    return findings
-      .filter(f => f.scanner_id !== HARDENING_INDEX_ID)
-      .map(f => ({ ...f, scan: meta }));
-  }, [scan, findings]);
+  const goSeverity = (s: Severity) => {
+    history.push(build(basePath, { severity: severityLabel(s) }));
+  };
+  const highlighted = severity ? SEVERITY_FROM_LABEL[severity] : undefined;
 
   return (
     <SectionBox
@@ -102,6 +89,11 @@ export function LynisScanDetail() {
         <SectionHeader
           title={`Lynis host audit — ${fmtDate(scan?.started_at ?? null)}`}
           subtitle={scan ? `status: ${scan.status}` : ''}
+          actions={[
+            <MuiLink key="back" component={RouterLink} to={build(SCANS_PATHS.hostOs)}>
+              ← Host OS
+            </MuiLink>,
+          ]}
         />
       }
     >
@@ -126,20 +118,25 @@ export function LynisScanDetail() {
           </Alert>
         ) : null}
 
-        {hardeningByNode.length > 0 ? (
+        {nodes.length > 0 ? (
           <Box>
             <Typography variant="subtitle1" sx={{ mb: 1 }}>
-              Hardening index by node (0–100, higher is better)
+              Hardening index by node (0–100, higher is better) — click a node for its findings
             </Typography>
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-              {hardeningByNode.map(h => (
-                <Chip
-                  key={h.node}
-                  color={indexColor(Number(h.value))}
-                  variant="outlined"
-                  icon={<Icon icon="mdi:server" width={16} height={16} />}
-                  label={`${h.node}: ${h.value || '?'}`}
-                />
+              {nodes.map(h => (
+                <Tooltip key={h.node} title={`All findings on ${h.node}`}>
+                  <Chip
+                    color={indexColor(Number(h.value || NaN))}
+                    variant="outlined"
+                    clickable
+                    icon={<Icon icon="mdi:server" width={16} height={16} />}
+                    label={`${h.node}: ${h.value || '?'}`}
+                    onClick={() =>
+                      history.push(build(`${basePath}/node/${encodeURIComponent(h.node)}`))
+                    }
+                  />
+                </Tooltip>
               ))}
             </Box>
           </Box>
@@ -147,14 +144,26 @@ export function LynisScanDetail() {
 
         <Box>
           <Typography variant="subtitle1" sx={{ mb: 1 }}>
-            Findings ({tableFindings.length})
+            Severity totals — click a card to filter the findings below
+          </Typography>
+          <StatCards counts={counts} onSelect={goSeverity} highlighted={highlighted} />
+        </Box>
+
+        <Box>
+          <SeverityFilterChip basePath={basePath} />
+          <Typography variant="subtitle1" sx={{ mb: 1 }}>
+            Findings ({visible.length}
+            {severity ? ` of ${all.length}` : ''})
           </Typography>
           <SortableFindingsTable
-            findings={tableFindings}
+            findings={visible}
+            columns={['severity', 'id', 'title', 'node', 'original']}
             emptyMessage={
-              scan?.status === 'completed'
-                ? 'No findings — every node came back clean.'
-                : 'No findings yet.'
+              severity
+                ? `No ${severity} findings in this audit.`
+                : scan?.status === 'completed'
+                  ? 'No findings — every node came back clean.'
+                  : 'No findings yet.'
             }
             onRowClick={f => {
               if (f.id !== undefined) history.push(build(`/security-scans/finding/${f.id}`));

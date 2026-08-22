@@ -7,8 +7,8 @@ description: >-
   normalized findings, and serves them to the plugin through the Kubernetes
   apiserver service proxy.
 type: application
-version: 0.6.0
-appVersion: "0.7.0"
+version: 0.7.0
+appVersion: "0.8.0"
 home: https://github.com/mcman2017/security-dashboard
 sources:
   - https://github.com/mcman2017/security-dashboard

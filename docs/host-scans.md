@@ -25,6 +25,13 @@ warnings → MEDIUM, suggestions → LOW, plus one INFO finding per node carryin
 hardening index. The raw `report.dat` for every node stays viewable on the scan's detail
 page.
 
+In the UI, the Host OS page shows severity total cards for the **latest completed audit**
+(click a card to open that audit filtered to the severity), then the list of audits. An
+audit's detail page shows a hardening-index chip per node (click a node to see only its
+findings), the audit's own severity cards (click to filter), and a findings table with a
+Severity column; every column header cycles ascending → descending → unsorted. The
+per-node page repeats that layout for one node, with its OS / kernel / Lynis version.
+
 Enable via chart values:
 
 ```yaml

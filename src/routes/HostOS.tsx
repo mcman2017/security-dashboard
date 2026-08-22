@@ -30,9 +30,11 @@ import {
 import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useHistory } from 'react-router';
 import { SeverityBadge } from '../components/SeverityBadge';
+import { StatCards } from '../components/StatCards';
 import { scansApi, ScanSummary } from '../lib/api';
+import { fmtDate } from '../lib/lynis';
 import { SCANS_PATHS, useClusterUrl } from '../lib/nav';
-import { SEVERITY_ORDER, severityLabel } from '../lib/severity';
+import { emptyCounts, Severity, SEVERITY_ORDER, severityLabel } from '../lib/severity';
 import { usePolling } from '../lib/usePolling';
 
 const { SectionBox, SectionHeader, SimpleTable } = CommonComponents;
@@ -40,14 +42,6 @@ const { SectionBox, SectionHeader, SimpleTable } = CommonComponents;
 // Namespace where the optional trivy-host-scanner DaemonSet runs — see
 // docs/host-scans.md (chart value hostScanners.namespace).
 const SCANNERS_NAMESPACE = 'trivy-system';
-
-function fmtDate(iso: string | null): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
 
 function statusChip(status: ScanSummary['status']): ReactNode {
   const color =
@@ -77,10 +71,20 @@ function LynisPanel() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const scans = useMemo(
-    () => (data?.scans ?? []).filter(s => s.scanner === 'lynis'),
+    () =>
+      (data?.scans ?? [])
+        .filter(s => s.scanner === 'lynis')
+        .sort((a, b) => (b.started_at ?? '').localeCompare(a.started_at ?? '')),
     [data]
   );
   const anyRunning = scans.some(s => s.status === 'running' || s.status === 'pending');
+  // The severity cards describe the most recent completed audit only — the
+  // current host posture — rather than summing every daily run.
+  const latest = scans.find(s => s.status === 'completed') ?? null;
+  const goSeverity = (sev: Severity) => {
+    if (!latest) return;
+    history.push(build(`${SCANS_PATHS.hostOs}/scan/${latest.id}`, { severity: severityLabel(sev) }));
+  };
 
   async function launch() {
     setLaunching(true);
@@ -140,6 +144,18 @@ function LynisPanel() {
         </Alert>
       ) : null}
       {launchError ? <Alert severity="error">{launchError}</Alert> : null}
+
+      <Box>
+        <Typography variant="subtitle1" sx={{ mb: 1 }}>
+          {latest
+            ? `Latest audit — ${fmtDate(latest.started_at)} (click a card to see those findings)`
+            : 'Latest audit — none completed yet'}
+        </Typography>
+        <StatCards
+          counts={latest?.summary_counts ?? emptyCounts()}
+          onSelect={latest ? goSeverity : undefined}
+        />
+      </Box>
 
       <Stack direction="row" spacing={2} alignItems="center">
         <Button
