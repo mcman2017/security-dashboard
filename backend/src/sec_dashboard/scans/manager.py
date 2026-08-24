@@ -29,15 +29,15 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
+from .. import storage
 from ..config import settings
-from ..severity import Severity
 from ..db import Event, Finding, Scan, get_sessionmaker
 from ..mock_data import mock_raw_output, mock_scans
-from .. import storage
-from .base import ScannerName
-from .k8s import K8sClient, get_k8s
+from ..severity import Severity
 from . import lynis as lynis_spec
 from . import trivy as trivy_spec
+from .base import ScannerName
+from .k8s import K8sClient, get_k8s
 from .parsers import parse_lynis, parse_trivy
 
 log = logging.getLogger(__name__)
@@ -397,7 +397,7 @@ class ScanManager:
             manifests = await _build_jobs_for(scan_id, scanner.value, variant, k8s)
         except (ValueError, RuntimeError):
             raise
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             raise RuntimeError(f"job-manifest build failed: {e}") from e
 
         primary_name = manifests[0]["metadata"]["name"]
@@ -419,7 +419,7 @@ class ScanManager:
                 name = await k8s.create_job(m)
                 created.append(name)
                 log.info("scan %s: created job %s", scan_id, name)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 # Roll back any partially-created jobs
                 for n in created:
                     await k8s.delete_job(n)
@@ -474,7 +474,7 @@ class ScanManager:
         except asyncio.CancelledError:
             log.info("scan %s: poller cancelled (process shutdown)", scan_id)
             raise
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.exception("scan %s: poller crashed", scan_id)
             await self._mark_failed(scan_id, f"poller crashed: {e}")
         finally:
@@ -687,7 +687,7 @@ class ScanManager:
             try:
                 if p.exists():
                     p.unlink()
-            except OSError as e:  # noqa: BLE001
+            except OSError as e:
                 log.warning("delete_scan %s: failed to remove %s: %s", scan_id, p, e)
 
         try:

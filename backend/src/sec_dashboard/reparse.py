@@ -20,6 +20,7 @@ import asyncio
 import gzip
 import json
 import os
+import re
 import sqlite3
 import sys
 
@@ -27,8 +28,6 @@ from sqlalchemy import select
 
 from .config import settings
 from .db import Scan, get_sessionmaker, init_db
-import re
-
 from .scans.manager import _summary_counts
 from .scans.parsers import parse_lynis, parse_trivy
 

@@ -1,1 +1,1 @@
-from .base import ScanResult, ScannerName  # noqa: F401
+from .base import ScannerName, ScanResult  # noqa: F401

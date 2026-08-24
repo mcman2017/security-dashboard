@@ -12,7 +12,6 @@ from sec_dashboard.scans.parsers.trivy import (
 )
 from sec_dashboard.severity import Severity
 
-
 # ---------- ecosystem bucket helper ----------
 
 def test_ecosystem_by_namespace():
