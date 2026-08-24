@@ -12,6 +12,7 @@ from typing import Any
 
 class ScannerName(StrEnum):
     TRIVY = "trivy"
+    LYNIS = "lynis"
 
 
 @dataclass

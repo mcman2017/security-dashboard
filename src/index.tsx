@@ -9,6 +9,8 @@ import { Configuration } from './routes/Configuration';
 import { FindingDetail } from './routes/FindingDetail';
 import { FindingsBySeverity } from './routes/FindingsBySeverity';
 import { HostOS } from './routes/HostOS';
+import { LynisNodeDetail } from './routes/LynisNodeDetail';
+import { LynisScanDetail } from './routes/LynisScanDetail';
 import { Overview } from './routes/Overview';
 import { Rbac } from './routes/Rbac';
 import { ScanDetail } from './routes/ScanDetail';
@@ -105,6 +107,24 @@ registerRoute({
   sidebar: 'security-scans-host',
   name: 'Host OS',
   component: HostOS,
+});
+// Per-scan detail for a backend-orchestrated Lynis host audit — reached from
+// the Host OS page's scan list. Highlights the Host OS sidebar entry.
+registerRoute({
+  path: `${BASE}/host-os/scan/:id`,
+  exact: true,
+  sidebar: 'security-scans-host',
+  name: 'Lynis audit detail',
+  component: LynisScanDetail,
+});
+// One node's slice of a Lynis audit — reached by clicking a node chip on the
+// audit detail page.
+registerRoute({
+  path: `${BASE}/host-os/scan/:id/node/:node`,
+  exact: true,
+  sidebar: 'security-scans-host',
+  name: 'Lynis node detail',
+  component: LynisNodeDetail,
 });
 registerRoute({
   path: `${BASE}/suppressions`,

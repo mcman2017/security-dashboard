@@ -1,7 +1,6 @@
 from datetime import datetime
-from typing import Optional
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, Boolean, event
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -17,15 +16,15 @@ class Scan(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     scanner: Mapped[str] = mapped_column(String(32), index=True)
-    variant: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    variant: Mapped[str | None] = mapped_column(String(32), nullable=True)
     status: Mapped[str] = mapped_column(String(16), index=True)  # pending|running|completed|failed
     started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
-    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    raw_json_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
-    raw_log_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw_json_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    raw_log_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     summary_counts: Mapped[dict] = mapped_column(JSON, default=dict)
-    job_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    job_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     findings: Mapped[list["Finding"]] = relationship(back_populates="scan", cascade="all, delete-orphan")
     events: Mapped[list["Event"]] = relationship(back_populates="scan", cascade="all, delete-orphan")
@@ -38,15 +37,15 @@ class Finding(Base):
     scan_id: Mapped[str] = mapped_column(String(36), ForeignKey("scans.id", ondelete="CASCADE"), index=True)
     severity_normalized: Mapped[int] = mapped_column(Integer, index=True)  # Severity enum value
     severity_original: Mapped[str] = mapped_column(String(32))
-    scanner_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)  # CVE id, control id, etc.
-    resource_ns: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
-    resource_kind: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    resource_name: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
-    image: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    scanner_id: Mapped[str | None] = mapped_column(String(128), nullable=True)  # CVE id, control id, etc.
+    resource_ns: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    resource_kind: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    resource_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    image: Mapped[str | None] = mapped_column(String(512), nullable=True)
     title: Mapped[str] = mapped_column(Text)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    control_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    evidence: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    control_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    evidence: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     ecosystem_bucket: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
     scan: Mapped[Scan] = relationship(back_populates="findings")

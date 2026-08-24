@@ -1,16 +1,14 @@
-{{- if or .Values.hostScanners.trivyRootfs.enabled .Values.hostScanners.lynis.enabled }}
-{{- if .Values.hostScanners.createNamespace }}
+{{- if and .Values.hostScanners.trivyRootfs.enabled .Values.hostScanners.createNamespace }}
 apiVersion: v1
 kind: Namespace
 metadata:
   name: {{ .Values.hostScanners.namespace }}
   labels:
     app.kubernetes.io/part-of: security-dashboard
-    # Host scanners mount the host filesystem read-only and (for Lynis) run
-    # privileged — the namespace must allow it.
+    # Host scanners mount the host filesystem read-only — the namespace must
+    # allow it.
     pod-security.kubernetes.io/enforce: privileged
 ---
-{{- end }}
 {{- end }}
 {{- if .Values.hostScanners.trivyRootfs.enabled }}
 # Per-node `trivy rootfs` of the host filesystem, HIGH/CRITICAL only, in a
@@ -119,89 +117,4 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: 8Gi
----
-{{- end }}
-{{- if .Values.hostScanners.lynis.enabled }}
-{{- if not .Values.hostScanners.lynis.image }}
-{{- fail "hostScanners.lynis.image is required when hostScanners.lynis.enabled=true (see docs/host-scans.md)" }}
-{{- end }}
-# Daily Lynis audit of the host OS. Surfaced on the plugin's "Host OS" page by
-# reading the job pod's logs. Privileged + hostPID so Lynis can inspect host
-# processes and the mounted root filesystem.
-apiVersion: batch/v1
-kind: CronJob
-metadata:
-  name: lynis-host-audit
-  namespace: {{ .Values.hostScanners.namespace }}
-  labels:
-    app: lynis-host-audit
-    app.kubernetes.io/component: host-os-audit
-    app.kubernetes.io/part-of: security-dashboard
-spec:
-  schedule: {{ .Values.hostScanners.lynis.schedule | quote }}
-  concurrencyPolicy: Forbid
-  startingDeadlineSeconds: 3600
-  successfulJobsHistoryLimit: 3
-  failedJobsHistoryLimit: 3
-  jobTemplate:
-    metadata:
-      labels:
-        app: lynis-host-audit
-    spec:
-      activeDeadlineSeconds: 1800
-      backoffLimit: 0
-      ttlSecondsAfterFinished: 604800
-      template:
-        metadata:
-          labels:
-            app: lynis-host-audit
-        spec:
-          automountServiceAccountToken: false
-          restartPolicy: Never
-          hostNetwork: true
-          hostPID: true
-          {{- with .Values.hostScanners.lynis.nodeSelector }}
-          nodeSelector:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          tolerations:
-            - operator: Exists
-          containers:
-            - name: lynis
-              image: {{ .Values.hostScanners.lynis.image }}
-              imagePullPolicy: IfNotPresent
-              command: ["/bin/sh", "-c"]
-              args:
-                - |
-                  set -eu
-                  echo "==================== $(date -Iseconds) lynis-host-audit on $(hostname) ===================="
-                  lynis audit system \
-                    --quick --quiet --forensics --no-colors \
-                    --report-file /tmp/report.dat \
-                    --log-file   /tmp/lynis.log \
-                    --auditor    security-dashboard || true
-                  echo "==================== REPORT (lynis show report) ===================="
-                  lynis show report 2>/dev/null || cat /tmp/report.dat
-                  echo "==================== END ===================="
-              resources:
-                requests:
-                  cpu: 100m
-                  memory: 128Mi
-                limits:
-                  memory: 512Mi
-              securityContext:
-                privileged: true
-              volumeMounts:
-                - name: rootfs
-                  mountPath: /rootfs
-                  readOnly: true
-                - name: tmp
-                  mountPath: /tmp
-          volumes:
-            - name: rootfs
-              hostPath:
-                path: /
-                type: Directory
-            - name: tmp
-              emptyDir: {}
 {{- end }}

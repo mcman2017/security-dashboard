@@ -20,6 +20,7 @@ import asyncio
 import gzip
 import json
 import os
+import re
 import sqlite3
 import sys
 
@@ -28,18 +29,35 @@ from sqlalchemy import select
 from .config import settings
 from .db import Scan, get_sessionmaker, init_db
 from .scans.manager import _summary_counts
-from .scans.parsers import parse_trivy
+from .scans.parsers import parse_lynis, parse_trivy
+
+# Section headers the manager writes when bundling multi-node lynis raw
+# output; reparse splits on the same markers to re-attribute each node.
+_LYNIS_NODE_HEADER_RE = re.compile(r"^# ===== node: (.+?) =====$", re.MULTILINE)
 
 
 def _parse_one(scanner: str, raw_bytes: bytes, target_node: str | None) -> list[dict]:
     if scanner == "trivy":
         return parse_trivy(json.loads(raw_bytes))
+    if scanner == "lynis":
+        return parse_lynis(raw_bytes.decode("utf-8", errors="replace"), target_node=target_node)
     raise ValueError(f"unknown scanner {scanner}")
 
 
 def _parse_bundle(scanner: str, raw_bytes: bytes) -> list[dict]:
     """Trivy scans are single-job, so the stored raw is always a single JSON
-    report. Kept as a thin wrapper for parity with the live ingestion path."""
+    report. Lynis raw is a plain-text bundle with one `# ===== node: X =====`
+    section per node — split and parse each with its node attribution."""
+    if scanner == "lynis":
+        text = raw_bytes.decode("utf-8", errors="replace")
+        findings: list[dict] = []
+        matches = list(_LYNIS_NODE_HEADER_RE.finditer(text))
+        if not matches:
+            return parse_lynis(text, target_node=None)
+        for i, m in enumerate(matches):
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+            findings.extend(parse_lynis(text[m.end():end], target_node=m.group(1)))
+        return findings
     return _parse_one(scanner, raw_bytes, target_node=None)
 
 

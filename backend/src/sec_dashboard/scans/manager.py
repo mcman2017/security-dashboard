@@ -29,15 +29,16 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
+from .. import storage
 from ..config import settings
-from ..severity import Severity
 from ..db import Event, Finding, Scan, get_sessionmaker
 from ..mock_data import mock_raw_output, mock_scans
-from .. import storage
+from ..severity import Severity
+from . import lynis as lynis_spec
+from . import trivy as trivy_spec
 from .base import ScannerName
 from .k8s import K8sClient, get_k8s
-from . import trivy as trivy_spec
-from .parsers import parse_trivy
+from .parsers import parse_lynis, parse_trivy
 
 log = logging.getLogger(__name__)
 
@@ -85,23 +86,41 @@ def _finding_to_dict(f: Finding) -> dict[str, Any]:
 _SCAN_RESULTS_DIR = "/scan-results"
 
 
-def _read_pvc_result(scan_id: str) -> bytes:
-    """Read the scan-result JSON for `scan_id` off the shared RWX PVC.
+def _pvc_result_path(scanner: str, scan_id: str, target: str | None) -> str:
+    """PVC path a scan Job writes its result to.
 
-    Trivy writes /scan-results/<scan-id>.json atomically (tmp + rename) on
-    successful completion. If the file is missing the scan must have failed
-    before producing output — caller surfaces that as an error.
+    Trivy: single Job → /scan-results/<scan-id>.json.
+    Lynis: one Job per node → /scan-results/<scan-id>/<node>.dat, so the
+    node name (the Job's `security-dashboard/job-target` label) is required.
     """
-    path = f"{_SCAN_RESULTS_DIR}/{scan_id}.json"
-    with open(path, "rb") as f:
+    if scanner == "lynis":
+        if not target:
+            raise ValueError("lynis result lookup requires the job's target node")
+        return f"{_SCAN_RESULTS_DIR}/{lynis_spec.result_rel_path(scan_id, target)}"
+    return f"{_SCAN_RESULTS_DIR}/{scan_id}.json"
+
+
+def _read_pvc_result(scanner: str, scan_id: str, target: str | None) -> bytes:
+    """Read one Job's scan-result file off the shared RWX PVC.
+
+    Jobs write atomically (tmp + rename) on successful completion. If the
+    file is missing the scan must have failed before producing output —
+    caller surfaces that as an error.
+    """
+    with open(_pvc_result_path(scanner, scan_id, target), "rb") as f:
         return f.read()
 
 
-def _cleanup_pvc_result(scan_id: str) -> None:
-    """Delete the scan-result JSON from the PVC after ingestion. Best-effort;
+def _cleanup_pvc_result(scanner: str, scan_id: str) -> None:
+    """Delete the scan-result file(s) from the PVC after ingestion. Best-effort;
     a leftover file won't break future scans (each gets its own id) but does
     consume PVC space."""
     import os
+    import shutil
+    if scanner == "lynis":
+        # Per-scan directory holding one .dat per node.
+        shutil.rmtree(f"{_SCAN_RESULTS_DIR}/{scan_id}", ignore_errors=True)
+        return
     for suffix in (".json", ".json.tmp"):
         path = f"{_SCAN_RESULTS_DIR}/{scan_id}{suffix}"
         try:
@@ -159,18 +178,30 @@ def _summary_counts(findings: list[dict]) -> dict[str, int]:
 
 
 async def _build_jobs_for(scan_id: str, scanner: str, variant: str | None, k8s: K8sClient) -> list[dict]:
-    # Trivy-only build. `k8s` is retained in the signature for callers/tests.
     if scanner == "trivy":
         if variant not in trivy_spec.VARIANTS:
             raise ValueError(f"unknown trivy variant {variant!r}; choose one of {sorted(trivy_spec.VARIANTS)}")
         return [trivy_spec.build_job(scan_id, variant)]
+    if scanner == "lynis":
+        if variant:
+            raise ValueError("lynis has no variants")
+        if not settings.lynis_image:
+            raise ValueError(
+                "lynis image not configured — set SEC_DASHBOARD_LYNIS_IMAGE "
+                "(Helm value lynis.image) to an image containing the lynis binary"
+            )
+        nodes = await k8s.list_nodes()
+        if not nodes:
+            raise RuntimeError("no cluster nodes visible to the backend")
+        return [lynis_spec.build_job(scan_id, n["name"], n["is_control_plane"]) for n in nodes]
     raise ValueError(f"unknown scanner {scanner}")
 
 
 def _parse_for(scanner: str, raw_bytes: bytes, *, target_node: str | None) -> list[dict]:
-    # Trivy-only parse. `target_node` is retained for signature compatibility.
     if scanner == "trivy":
         return parse_trivy(json.loads(raw_bytes))
+    if scanner == "lynis":
+        return parse_lynis(raw_bytes.decode("utf-8", errors="replace"), target_node=target_node)
     raise ValueError(f"no parser for {scanner}")
 
 
@@ -366,7 +397,7 @@ class ScanManager:
             manifests = await _build_jobs_for(scan_id, scanner.value, variant, k8s)
         except (ValueError, RuntimeError):
             raise
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             raise RuntimeError(f"job-manifest build failed: {e}") from e
 
         primary_name = manifests[0]["metadata"]["name"]
@@ -388,7 +419,7 @@ class ScanManager:
                 name = await k8s.create_job(m)
                 created.append(name)
                 log.info("scan %s: created job %s", scan_id, name)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 # Roll back any partially-created jobs
                 for n in created:
                     await k8s.delete_job(n)
@@ -443,7 +474,7 @@ class ScanManager:
         except asyncio.CancelledError:
             log.info("scan %s: poller cancelled (process shutdown)", scan_id)
             raise
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.exception("scan %s: poller crashed", scan_id)
             await self._mark_failed(scan_id, f"poller crashed: {e}")
         finally:
@@ -472,15 +503,19 @@ class ScanManager:
                 # in the UI's raw-log page even on a successful scan.
                 scanner_log = await k8s.read_container_log(pod, "scanner")
                 scanner_logs[name] = scanner_log
-                # Trivy writes its result file to the shared RWX PVC
+                # Scan Jobs write their result file to the shared RWX PVC
                 # (security-dashboard-scan-results). Read it as a file — no
-                # kubelet log-rotation ceiling on large vuln output.
+                # kubelet log-rotation ceiling on large output. Multi-job
+                # scanners (lynis) write one file per node, keyed by the
+                # Job's `job-target` label.
                 try:
-                    raw_bytes = await asyncio.to_thread(_read_pvc_result, scan_id)
+                    raw_bytes = await asyncio.to_thread(
+                        _read_pvc_result, scanner_name, scan_id, j.get("target")
+                    )
                 except FileNotFoundError:
                     errors.append(
                         f"{name}: succeeded but no result file at "
-                        f"{_SCAN_RESULTS_DIR}/{scan_id}.json — trivy crashed "
+                        f"{_pvc_result_path(scanner_name, scan_id, j.get('target'))} — scanner crashed "
                         f"after the .tmp rename. Scanner log tail: " +
                         ("\n".join(scanner_log.splitlines()[-10:]) if scanner_log else "(empty)")
                     )
@@ -488,14 +523,17 @@ class ScanManager:
                 except Exception as e:  # noqa: BLE001
                     errors.append(f"{name}: result load failed: {e}")
                     continue
-                raw_outputs[name] = raw_bytes
+                # Key lynis raw outputs by node so the raw bundle reads as
+                # "node: laser-1" sections instead of ephemeral Job names.
+                raw_outputs[j.get("target") or name] = raw_bytes
                 try:
                     findings = _parse_for(scanner_name, raw_bytes, target_node=j.get("target"))
                 except Exception as e:  # noqa: BLE001
                     errors.append(f"{name}: parse failed: {e}")
                     continue
                 all_findings.extend(findings)
-                all_findings.extend(_unscannable_image_findings(scanner_log))
+                if scanner_name == "trivy":
+                    all_findings.extend(_unscannable_image_findings(scanner_log))
             elif j["failed"] > 0:
                 pod = await k8s.find_pod(name)
                 scanner_log = ""
@@ -523,7 +561,16 @@ class ScanManager:
 
         # Persist raw outputs to PVC files (bundled for multi-job scans).
         raw_json_path: str | None = None
-        if len(raw_outputs) == 1:
+        if scanner_name == "lynis" and raw_outputs:
+            # Plain-text bundle with per-node section headers (report.dat is
+            # text, not JSON). get_raw's JSON fallback serves it verbatim, and
+            # reparse splits on the same headers to re-attribute nodes.
+            bundle_text = "\n\n".join(
+                f"# ===== node: {node} =====\n{rb.decode('utf-8', errors='replace').rstrip()}"
+                for node, rb in sorted(raw_outputs.items())
+            )
+            raw_json_path = storage.write_raw_json(scan_id, bundle_text.encode())
+        elif len(raw_outputs) == 1:
             only = next(iter(raw_outputs.values()))
             raw_json_path = storage.write_raw_json(scan_id, only)
         elif raw_outputs:
@@ -570,11 +617,10 @@ class ScanManager:
         from ..reparse import _bulk_replace_findings
         await asyncio.to_thread(_bulk_replace_findings, scan_id, all_findings)
 
-        # Trivy writes its raw result to the shared RWX PVC; we already
+        # Scan Jobs write their raw results to the shared RWX PVC; we already
         # persisted a copy via storage.write_raw_json above (in raw_outputs).
         # Drop the PVC copy so it doesn't accumulate.
-        if scanner_name == "trivy":
-            await asyncio.to_thread(_cleanup_pvc_result, scan_id)
+        await asyncio.to_thread(_cleanup_pvc_result, scanner_name, scan_id)
 
         for j in jobs:
             await k8s.delete_job(j["name"])
@@ -631,15 +677,17 @@ class ScanManager:
             scan = res.scalar_one_or_none()
             if scan is None:
                 return False
+            scanner_name = scan.scanner
             await sess.delete(scan)   # cascade=all,delete-orphan removes findings + events
             await sess.commit()
 
         # Best-effort cleanup of PVC artefacts + any leftover Job.
+        await asyncio.to_thread(_cleanup_pvc_result, scanner_name, scan_id)
         for p in (storage.raw_json_path(scan_id), storage.raw_log_path(scan_id)):
             try:
                 if p.exists():
                     p.unlink()
-            except OSError as e:  # noqa: BLE001
+            except OSError as e:
                 log.warning("delete_scan %s: failed to remove %s: %s", scan_id, p, e)
 
         try:

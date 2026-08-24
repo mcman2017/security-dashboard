@@ -5,9 +5,8 @@ SQLite holds parsed findings + scan metadata. The verbatim scanner output
 serve "Download raw JSON" without bloating the DB.
 """
 
-from pathlib import Path
-
 import gzip
+from pathlib import Path
 
 from .config import settings
 

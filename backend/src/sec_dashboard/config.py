@@ -42,6 +42,19 @@ class Settings(BaseSettings):
     def raw_dir(self) -> str:
         return str(Path(self.data_dir) / "raw")
 
+    # Image containing the `lynis` binary, used for the per-node host-OS audit
+    # Jobs. No official upstream image exists — operators build their own
+    # (multi-arch if the cluster mixes architectures) and set it via the Helm
+    # value `lynis.image`. Empty = the lynis scanner is unavailable and
+    # launching it returns an actionable error.
+    lynis_image: str = ""
+    # Comma-separated imagePullSecret names for the lynis Jobs — needed when
+    # lynis_image lives in a private registry. Empty = none.
+    lynis_image_pull_secrets: str = ""
+    # Per-node Job cap. A full `lynis audit system` normally takes 2-5 min;
+    # the cap only bounds hung nodes so a scan can't stay "running" forever.
+    lynis_job_deadline_s: int = 1_800
+
     # 0.61+ required: earlier versions abort the whole `trivy k8s` scan when a
     # single image can't be fetched; newer ones log an ERROR for that image and
     # keep scanning (we surface those as INFO findings — see manager.py).

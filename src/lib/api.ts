@@ -26,7 +26,7 @@ export interface ScanSummary {
   job_name?: string;
 }
 
-export interface FindingWithScan {
+export interface Finding {
   id?: number; // absent from backends older than the detail-page feature
   severity_normalized: number;
   severity_original: string;
@@ -40,7 +40,17 @@ export interface FindingWithScan {
   control_id: string | null;
   evidence: Record<string, unknown> | null;
   ecosystem_bucket: boolean;
+}
+
+export interface FindingWithScan extends Finding {
   scan: { id: string; scanner: string; variant: string | null; started_at: string | null };
+}
+
+// GET /scans/{id} — the scan summary plus its findings (no `scan` annotation
+// on each finding; callers that feed FindingWithScan consumers synthesize it
+// from the summary).
+export interface ScanDetailResponse extends ScanSummary {
+  findings: Finding[];
 }
 
 // Another image/workload hit by the same CVE/check, listed on the detail page.
@@ -58,6 +68,7 @@ export interface FindingDetailResponse extends FindingWithScan {
 }
 
 export type TrivyVariant = 'cis' | 'nsa' | 'vuln';
+export type ScannerKind = 'trivy' | 'lynis';
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   // ApiProxy.request proxies to the cluster apiserver using Headlamp's creds
@@ -70,11 +81,16 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const scansApi = {
   list: () => req<{ scans: ScanSummary[] }>('/scans'),
-  launch: (variant: TrivyVariant) =>
+  launch: (scanner: ScannerKind, variant: TrivyVariant | null = null) =>
     req<ScanSummary>('/scans', {
       method: 'POST',
-      body: JSON.stringify({ scanner: 'trivy', variant }),
+      body: JSON.stringify({ scanner, variant }),
     }),
+  get: (id: string) => req<ScanDetailResponse>(`/scans/${encodeURIComponent(id)}`),
+  raw: (id: string) =>
+    req<{ scan_id: string; scanner: string; raw: string }>(
+      `/scans/${encodeURIComponent(id)}/raw`
+    ),
   remove: (id: string) =>
     req<{ id: string; deleted: boolean }>(`/scans/${encodeURIComponent(id)}`, {
       method: 'DELETE',
@@ -87,9 +103,15 @@ export const scansApi = {
     req<FindingDetailResponse>(`/findings/${encodeURIComponent(id)}`),
 };
 
-// The three launchable Trivy scans, in display order.
-export const SCAN_CHOICES: Array<{ variant: TrivyVariant; label: string; description: string }> = [
-  { variant: 'cis', label: 'CIS', description: 'CIS Kubernetes Benchmark (k8s-cis-1.23)' },
-  { variant: 'nsa', label: 'NSA', description: 'NSA/CISA Kubernetes hardening (k8s-nsa-1.0)' },
-  { variant: 'vuln', label: 'Full Vulnerability', description: 'CVE scan across all cluster images' },
+// The launchable scans, in display order.
+export const SCAN_CHOICES: Array<{
+  scanner: ScannerKind;
+  variant: TrivyVariant | null;
+  label: string;
+  description: string;
+}> = [
+  { scanner: 'trivy', variant: 'cis', label: 'CIS', description: 'CIS Kubernetes Benchmark (k8s-cis-1.23)' },
+  { scanner: 'trivy', variant: 'nsa', label: 'NSA', description: 'NSA/CISA Kubernetes hardening (k8s-nsa-1.0)' },
+  { scanner: 'trivy', variant: 'vuln', label: 'Full Vulnerability', description: 'CVE scan across all cluster images' },
+  { scanner: 'lynis', variant: null, label: 'Host OS (Lynis)', description: 'Lynis hardening audit on every cluster node' },
 ];

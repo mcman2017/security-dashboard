@@ -1,6 +1,6 @@
 [project]
 name = "security-dashboard-backend"
-version = "0.6.0"
+version = "0.7.0"
 description = "On-demand Trivy scanning backend for the Headlamp security-dashboard plugin"
 license = "Apache-2.0"
 requires-python = ">=3.12"
@@ -20,7 +20,7 @@ dependencies = [
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
-    "ruff>=0.7",
+    "ruff>=0.16,<0.17",
 ]
 
 [build-system]
@@ -33,6 +33,14 @@ packages = ["src/sec_dashboard"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+
+[tool.ruff.lint]
+ignore = [
+    "DTZ003",  # naive UTC datetimes are deliberate: the SQLite DateTime columns store naive UTC
+    "S110",    # best-effort cleanup paths (job/temp-dir deletion) intentionally swallow errors
+    "ISC004",  # implicit f-string concatenation inside shell command lists reads better split
+    "SIM115",  # test helper needs a NamedTemporaryFile that outlives the with-block (delete=False)
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -77,6 +77,27 @@ suppressions:
   #     reason: app-by-design
   #     justification: ...
 
+# Lynis host-OS audit — a first-class scanner orchestrated by the backend:
+# one privileged Job per cluster node (control-plane included), pinned via
+# nodeName, results parsed into findings like the Trivy scans. Launchable
+# on demand from the plugin's "Host OS" page and, optionally, on a daily
+# schedule. Jobs run in the release namespace, which must be labeled
+#   pod-security.kubernetes.io/enforce=privileged
+# (see NOTES). See docs/host-scans.md.
+lynis:
+  enabled: false
+  # REQUIRED when enabled: an image containing the `lynis` binary — there is
+  # no official upstream image; see docs/host-scans.md for a two-line
+  # Dockerfile. Build it multi-arch if your nodes mix architectures.
+  image: ""
+  schedule:
+    # Daily scheduled audit — a CronJob that POSTs a lynis scan launch to the
+    # backend API (same path as the UI button).
+    enabled: true
+    cron: "30 3 * * *"
+    # Optional CronJob timeZone (needs Kubernetes >= 1.27), e.g. "Etc/UTC".
+    timeZone: ""
+
 # Optional host-OS scanners surfaced on the plugin's "Host OS" page. These run
 # in a separate namespace (default trivy-system — the plugin's Host OS page
 # reads pod logs from that namespace) and require privileged access to the
@@ -89,15 +110,6 @@ hostScanners:
     enabled: false
     image: aquasec/trivy:0.59.0
     extraSkipDirs: []
-  # Daily Lynis audit of the host OS (CronJob). Requires an image containing
-  # the `lynis` binary — there is no official upstream image; see
-  # docs/host-scans.md for a two-line Dockerfile.
-  lynis:
-    enabled: false
-    image: ""
-    schedule: "0 3 * * *"
-    # Pin the audit to one node (empty = any node).
-    nodeSelector: {}
 
 resources:
   requests:
